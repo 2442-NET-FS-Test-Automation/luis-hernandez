@@ -1,0 +1,9 @@
+
+# Ignorar la metadata generada en la carpeta obj
+obj/
+obj/**
+# Ignorar la metadata generada en la carpeta bin
+bin/
+bin/**
+# Ignorar archivos de configuración de Visual Studio
+.vs/
