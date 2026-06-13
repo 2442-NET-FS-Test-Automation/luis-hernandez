@@ -1,11 +1,30 @@
 {
   "version": 4,
   "targets": {
-    "net10.0": {}
+    "net10.0": {
+      "CalorieCounter.Domain/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "compile": {
+          "bin/placeholder/CalorieCounter.Domain.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/CalorieCounter.Domain.dll": {}
+        }
+      }
+    }
   },
-  "libraries": {},
+  "libraries": {
+    "CalorieCounter.Domain/1.0.0": {
+      "type": "project",
+      "path": "../CalorieCounter.Domain/CalorieCounter.Domain.csproj",
+      "msbuildProject": "../CalorieCounter.Domain/CalorieCounter.Domain.csproj"
+    }
+  },
   "projectFileDependencyGroups": {
-    "net10.0": []
+    "net10.0": [
+      "CalorieCounter.Domain >= 1.0.0"
+    ]
   },
   "packageFolders": {
     "C:\\Users\\luis0\\.nuget\\packages\\": {},
@@ -36,7 +55,11 @@
         "net10.0": {
           "framework": "net10.0",
           "targetAlias": "net10.0",
-          "projectReferences": {}
+          "projectReferences": {
+            "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Projects\\CalorieCounter\\CalorieCounter.Domain\\CalorieCounter.Domain.csproj": {
+              "projectPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Projects\\CalorieCounter\\CalorieCounter.Domain\\CalorieCounter.Domain.csproj"
+            }
+          }
         }
       },
       "warningProperties": {
