@@ -1,104 +1,232 @@
-CalorieCounter
-Project Overview
+# CalorieCounter
 
-CalorieCounter is a personal nutrition tracking application designed to help users monitor their daily calorie intake and macronutrient consumption over time.
+A personal nutrition tracking application built with C# and .NET.
 
-The application focuses on tracking the following nutritional metrics:
+The purpose of this project is to help users monitor their daily calorie and macronutrient intake while serving as a practical platform for learning software engineering concepts, object-oriented programming, and modern .NET development practices.
 
-Calories
-Protein
-Carbohydrates
-Fat
+---
 
-The goal is to provide users with a flexible way to record meals, calculate nutritional values, and maintain a historical record of their dietary habits.
+## Project Goals
 
-Functional Requirements
+The application allows users to:
 
-At its core, the application manages nutritional data associated with foods, recipes, meals, and daily consumption records.
+- Track daily calorie consumption.
+- Track macronutrient intake:
+  - Protein
+  - Carbohydrates
+  - Fat
+- Record meals consumed throughout the day.
+- Create reusable recipes composed of multiple foods.
+- Maintain historical nutrition records over time.
 
-For each food item, the system stores:
+---
 
-Calories
-Protein
-Carbohydrates
-Fat
-Reference serving size
+## Core Features
 
-Using this information, the application must support creating, retrieving, updating, and deleting (CRUD) operations for the following entities:
+### Food Management
 
-Daily Records
+Manage nutritional information for individual food items.
 
-A daily record represents the total nutritional intake for a specific day.
+Each food stores:
 
-The system must allow users to:
+- Name
+- Reference serving size
+- Calories
+- Protein
+- Carbohydrates
+- Fat
 
-Create daily records
-View daily records
-Update daily records
-Delete daily records
-Foods
+Supported operations:
 
-A food represents a single ingredient or consumable item with defined nutritional information.
+- Create
+- Read
+- Update
+- Delete
 
-The system must allow users to:
+---
 
-Create foods
-View foods
-Update foods
-Delete foods
-Recipes
+### Recipe Management
 
-A recipe is composed of one or more foods and their corresponding quantities.
+Create recipes composed of one or more foods.
 
-The system must allow users to:
+Each recipe contains:
 
-Create recipes
-View recipes
-Update recipes
-Delete recipes
-Meals
+- A collection of foods
+- Quantities for each food
+- Calculated nutritional values
 
-A meal contains foods and/or recipes consumed by the user.
+Supported operations:
 
-The system must allow users to:
+- Create
+- Read
+- Update
+- Delete
 
-Create meals
-View meals
-Update meals
-Delete meals
+---
 
-The nutritional values of a meal must be calculated from the foods and recipes it contains.
+### Meal Tracking
 
-Nutritional Calculations
-Food Consumption
+Track foods and recipes consumed during a meal.
 
-The nutritional values of a consumed food must be calculated proportionally based on its reference serving size.
+Examples:
 
-For example:
+- Breakfast
+- Lunch
+- Dinner
+- Snack
 
-Reference serving: 100 g
-Calories: 250 kcal
-Consumed amount: 50 g
+The nutritional values of a meal are calculated from all foods and recipes it contains.
+
+Supported operations:
+
+- Create
+- Read
+- Update
+- Delete
+
+---
+
+### Daily Nutrition Tracking
+
+Track nutritional intake for a specific day.
+
+The system calculates:
+
+- Total calories
+- Total protein
+- Total carbohydrates
+- Total fat
+
+Supported operations:
+
+- Create
+- Read
+- Update
+- Delete
+
+---
+
+## Nutritional Calculation Rules
+
+### Food Consumption
+
+Nutritional values are calculated proportionally based on a food's reference serving size.
+
+Example:
+
+| Property | Value |
+|----------|--------|
+| Reference Serving | 100 g |
+| Calories | 250 kcal |
+| Consumed Amount | 50 g |
 
 Result:
 
-Calories consumed: 125 kcal
+| Property | Value |
+|----------|--------|
+| Calories Consumed | 125 kcal |
 
 The same proportional calculation applies to protein, carbohydrates, and fat.
 
-Recipe Consumption
+---
 
-The nutritional values of a recipe must be calculated from the combined nutritional values of all foods included in the recipe.
+### Recipe Consumption
 
-When a user consumes only a portion of a recipe, the nutritional values must be calculated proportionally according to the consumed amount relative to the recipe's total quantity.
+A recipe's nutritional values are calculated from the combined nutritional values of all included foods.
 
-Future Considerations
+When only a portion of a recipe is consumed, nutritional values are calculated proportionally according to the consumed amount relative to the recipe's total quantity.
 
-Potential future enhancements include:
+---
 
-Additional micronutrient tracking
-User profiles and goals
-Weight tracking
-Meal planning
-Historical analytics and reporting
-Integration with external nutrition databases
+## Domain Model
+
+The current domain revolves around the following core entities:
+
+```text
+Food
+ └─ Nutritional Information
+
+Recipe
+ └─ Contains Foods
+
+Meal
+ ├─ Contains Foods
+ └─ Contains Recipes
+
+DailyRecord
+ └─ Contains Meals
+```
+
+---
+
+## Learning Objectives
+
+This repository is also used as a hands-on learning project for:
+
+- C#
+- .NET CLI
+- Object-Oriented Programming (OOP)
+- SOLID Principles
+- Design Patterns
+- Collections and Generics
+- Exception Handling
+- Unit Testing
+- Async/Await
+- HTTP APIs
+- Data Structures and Algorithms
+
+Progress is tracked in:
+
+```text
+LEARNING_CHECKLIST.md
+```
+
+---
+
+## Project Structure
+
+```text
+CalorieCounter/
+│
+├── README.md
+├── LEARNING_CHECKLIST.md
+│
+├── CalorieCounter.Console/
+└── CalorieCounter.Domain/
+```
+
+---
+
+## Running the Application
+
+Build the solution:
+
+```bash
+dotnet build
+```
+
+Run the console application:
+
+```bash
+dotnet run --project CalorieCounter.Console
+```
+
+---
+
+## Future Enhancements
+
+Planned features include:
+
+- User profiles
+- Calorie targets
+- Macronutrient goals
+- Weight tracking
+- Progress reports
+- Persistence layer
+- Integration with external nutrition databases
+
+---
+
+## License
+
+This project is intended for educational purposes and personal learning.
