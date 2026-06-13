@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="CalorieCounter.App/CalorieCounter.App.csproj" />
+  <Project Path="CalorieCounter.Domain/CalorieCounter.Domain.csproj" />
+</Solution>
