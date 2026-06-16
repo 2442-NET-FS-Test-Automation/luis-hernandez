@@ -13,11 +13,9 @@ public class Program
     public static void Main()
     {
         Program.DataTypesAndOperators();
-        Program.ControlFlow();
-        Program.Loops();
-        Program.ArraysWork();
         Program.ClassesExample();
         Program.OopDemo();
+        Program.CollectonsDemo();
     }
 
     // private - accessible only within this class
@@ -205,5 +203,45 @@ public class Program
         Console.WriteLine("== New ==");
         Console.WriteLine($"Magazine Shelfabel -> {wired.Shelfabel()}");
         Console.WriteLine($"LibraryItem Shelfabel -> {baseMag.Shelfabel()}");
+    }
+
+    private static void CollectonsDemo()
+    {
+        Console.WriteLine("\n\n == Collections Demo ==");
+
+        //Creating a catalog objects
+        //Because this is a backed by a list, it grows and shrinks for us
+        Catalog catalog = new();
+
+        //I could create my objects
+        Book dune = new Book("Dune", "Frank Herbert", 3);
+
+        // Then add them
+        catalog.Items.Add(dune);
+
+        catalog.Items.Add(new ReferenceBook("C# Languge Standards", "Microsoft", "Technology"));
+        catalog.Items.Add(new Magazine("Sport Ilustrated", "Fransisco", 5, "Conde Naste"));
+
+        Console.WriteLine($"Catalog holds {catalog.Count} items; first is {catalog.Items[0].Title}");
+
+        //Enum + Struct use
+        ItemKind kind = ItemKind.Magazine;
+
+        ShelfLocation where = new ShelfLocation(3, 12); // struct - look a lot like a class, but is a VALUE type.
+
+        Console.WriteLine($"The {kind} is located at {where}");
+
+        Book duneCopy = dune; // Because Book is a class, it is a reference type. duneCopy is a reference to the same object as dune
+
+        ShelfLocation where2 = where; // Because ShelfLocation is a struct, it is a value type. where2 is a copy of where, they are two different objects in memory with the same data.
+
+        //Generics: our own Shelf<T> class that can hold anythinf, through tecnically all the collections we used thusfar have been generic classes themselves.
+        Shelf<LibraryItem> shelf = new Shelf<LibraryItem>(2);
+        Shelf<int> intShelf = new Shelf<int>(200);
+
+        shelf.TryAdd(catalog.Items[0]);
+        shelf.TryAdd(catalog.Items[1]);
+
+        Console.WriteLine($"Trying to add a third thing in our catalog: {shelf.TryAdd(catalog.Items[2])}");
     }
 }
