@@ -1,6 +1,9 @@
 ﻿// If I have code from another namespace that I wannt to use her - I use a using satatement to import it.
+using System.Data.Common;
 using Library.Domain;
+using Libraryaa.Domain;
 using LibraryKata.Domain;
+using Serilog;
 
 namespace LibraryKata.App; // A logical container for different related code files.
 
@@ -12,10 +15,18 @@ public class Program
     // void - it doesn't return anything
     public static void Main()
     {
-        Program.DataTypesAndOperators();
-        Program.ClassesExample();
-        Program.OopDemo();
-        Program.CollectonsDemo();
+        //Lets configure Serilog here before any code execution
+        //Serilog works via a singleton object. Its shared globally
+        //throughout the app, configure once use anywhere
+        Log.Logger = new LoggerConfiguration()
+        .MinimumLevel.Information() //Verbose > Debug > Info > Warning > Error > Fatal
+        .WriteTo.Console() // Sink where do my log go? text file, database, etc?
+        .CreateLogger();
+
+
+        Program.ExceptionDemo();
+
+        Log.CloseAndFlush();
     }
 
     // private - accessible only within this class
@@ -217,12 +228,12 @@ public class Program
         Book dune = new Book("Dune", "Frank Herbert", 3);
 
         // Then add them
-        catalog.Items.Add(dune);
+        catalog.Add(dune);
 
-        catalog.Items.Add(new ReferenceBook("C# Languge Standards", "Microsoft", "Technology"));
-        catalog.Items.Add(new Magazine("Sport Ilustrated", "Fransisco", 5, "Conde Naste"));
+        catalog.Add(new ReferenceBook("C# Languge Standards", "Microsoft", "Technology"));
+        catalog.Add(new Magazine("Sport Ilustrated", "Fransisco", 5, "Conde Naste"));
 
-        Console.WriteLine($"Catalog holds {catalog.Count} items; first is {catalog.Items[0].Title}");
+        Console.WriteLine($"Catalog holds {catalog.Count} items; first is {catalog[0].Title}");
 
         //Enum + Struct use
         ItemKind kind = ItemKind.Magazine;
@@ -239,9 +250,76 @@ public class Program
         Shelf<LibraryItem> shelf = new Shelf<LibraryItem>(2);
         Shelf<int> intShelf = new Shelf<int>(200);
 
-        shelf.TryAdd(catalog.Items[0]);
-        shelf.TryAdd(catalog.Items[1]);
+        shelf.TryAdd(catalog[0]);
+        shelf.TryAdd(catalog[1]);
 
-        Console.WriteLine($"Trying to add a third thing in our catalog: {shelf.TryAdd(catalog.Items[2])}");
+        Console.WriteLine($"Trying to add a third thing in our catalog: {shelf.TryAdd(catalog[2])}");
+    }
+
+    public static void ExceptionDemo()
+    {
+        Console.WriteLine("\n == Exceptions, patterns, logging ==");
+
+        //By using liskov substitution from SOLID, if I later swap to a SQL Library or whatever, this is the only thing I have to change
+        ILibraryRepository repo = new InMemoryLibraryRepository();
+
+        //Injecting our existing repo object to satisfy libraryUnitOfWork's dependency
+        IUnitOfWork libraryWork = new LibraryUnitOfWork(repo);
+
+        LibraryItem dune = LibraryItemFactory.Create(ItemKind.Book, "Dune", "Frank Herbert", copies: 3);
+
+        repo.Add(dune);
+
+        repo.Add(LibraryItemFactory.Create(ItemKind.Magazine, "Wired", "Axel", copies: 2));
+
+        //Pretend were commiting changes to a DB or something
+        libraryWork.Stage("added 2 items");
+        libraryWork.Commit();
+
+        //We went through the trouble of creatung custom exceptions
+        //Lets actually see them work for us, If you have code that can potentially fail
+        //wrap it in a ry-catch (optinal finally)
+        try
+        {
+            LibraryItem missing = repo.GetById(99);
+            Console.WriteLine(missing.Describe());
+        }
+        catch (ItemNotFoundException ex)
+        {
+            //Handle exception from most -> specific
+            Log.Error("Lookup failes for id {Id}: {Message}", ex.Id, ex.Message);
+        }
+        catch (LibraryException ex)
+        {
+            Log.Error("Library error: {}", ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Non Library Error: {Message}", ex.Message);
+        }
+        finally
+        {
+            //Optional, but adding a finally block adds code that runs whether an exception is caught or not
+            Console.WriteLine();
+        }
+
+        Book noCopies = new Book("Count of Montecristo", "Alejandro Dumas", 0);
+
+        try
+        {
+            Borrow(noCopies);
+        } 
+        catch(ItemNotAvailableException ex)
+        {
+            Log.Warning("Borrow refused: {Message}", ex.Message);
+        }
+    }
+
+    public static void Borrow(Book book)
+    {
+        if(!book.Checkout())
+        {
+            throw new ItemNotAvailableException(book.Title);
+        }
     }
 }

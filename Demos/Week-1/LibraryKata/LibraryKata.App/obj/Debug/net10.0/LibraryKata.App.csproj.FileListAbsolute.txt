@@ -36,3 +36,5 @@ C:\Users\luis0\OneDrive\Documentos\jakartaee-hello-world\luis-hernandez\Demos\We
 C:\Users\luis0\OneDrive\Documentos\jakartaee-hello-world\luis-hernandez\Demos\Week-1\LibraryKata\LibraryKata.App\obj\Debug\net10.0\LibraryKata.App.pdb
 C:\Users\luis0\OneDrive\Documentos\jakartaee-hello-world\luis-hernandez\Demos\Week-1\LibraryKata\LibraryKata.App\obj\Debug\net10.0\LibraryKata.App.genruntimeconfig.cache
 C:\Users\luis0\OneDrive\Documentos\jakartaee-hello-world\luis-hernandez\Demos\Week-1\LibraryKata\LibraryKata.App\obj\Debug\net10.0\ref\LibraryKata.App.dll
+C:\Users\luis0\OneDrive\Documentos\jakartaee-hello-world\luis-hernandez\Demos\Week-1\LibraryKata\LibraryKata.App\bin\Debug\net10.0\Serilog.dll
+C:\Users\luis0\OneDrive\Documentos\jakartaee-hello-world\luis-hernandez\Demos\Week-1\LibraryKata\LibraryKata.App\bin\Debug\net10.0\Serilog.Sinks.Console.dll
