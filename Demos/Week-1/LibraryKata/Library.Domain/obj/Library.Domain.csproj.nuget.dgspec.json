@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj": {}
+    "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj": {}
   },
   "projects": {
-    "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj": {
+    "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj",
+        "projectUniqueName": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj",
         "projectName": "Library.Domain",
-        "projectPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj",
+        "projectPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj",
         "packagesPath": "C:\\Users\\luis0\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\Library.Domain\\obj\\",
+        "outputPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\Library.Domain\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files\\dotnet\\sdk\\NuGetFallbackFolder"

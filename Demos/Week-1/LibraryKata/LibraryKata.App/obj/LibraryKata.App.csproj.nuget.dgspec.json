@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\LibraryKata.App\\LibraryKata.App.csproj": {}
+    "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\LibraryKata.App\\LibraryKata.App.csproj": {}
   },
   "projects": {
-    "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj": {
+    "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj",
+        "projectUniqueName": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj",
         "projectName": "Library.Domain",
-        "projectPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj",
+        "projectPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj",
         "packagesPath": "C:\\Users\\luis0\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\Library.Domain\\obj\\",
+        "outputPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\Library.Domain\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files\\dotnet\\sdk\\NuGetFallbackFolder"
@@ -48,6 +48,16 @@
         "net10.0": {
           "framework": "net10.0",
           "targetAlias": "net10.0",
+          "dependencies": {
+            "Serilog": {
+              "target": "Package",
+              "version": "[4.3.1, )"
+            },
+            "Serilog.Sinks.Console": {
+              "target": "Package",
+              "version": "[6.1.1, )"
+            }
+          },
           "imports": [
             "net461",
             "net462",
@@ -342,14 +352,14 @@
         }
       }
     },
-    "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\LibraryKata.App\\LibraryKata.App.csproj": {
+    "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\LibraryKata.App\\LibraryKata.App.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\LibraryKata.App\\LibraryKata.App.csproj",
+        "projectUniqueName": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\LibraryKata.App\\LibraryKata.App.csproj",
         "projectName": "LibraryKata.App",
-        "projectPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\LibraryKata.App\\LibraryKata.App.csproj",
+        "projectPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\LibraryKata.App\\LibraryKata.App.csproj",
         "packagesPath": "C:\\Users\\luis0\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\LibraryKata.App\\obj\\",
+        "outputPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\LibraryKata.App\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files\\dotnet\\sdk\\NuGetFallbackFolder"
@@ -368,8 +378,8 @@
             "framework": "net10.0",
             "targetAlias": "net10.0",
             "projectReferences": {
-              "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj": {
-                "projectPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj"
+              "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj": {
+                "projectPath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\Library.Domain\\Library.Domain.csproj"
               }
             }
           }

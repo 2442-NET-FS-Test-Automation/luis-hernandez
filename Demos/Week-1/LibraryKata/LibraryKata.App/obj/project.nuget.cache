@@ -1,8 +1,11 @@
 {
   "version": 2,
-  "dgSpecHash": "hv4+EfQrrAI=",
+  "dgSpecHash": "kqCxqGwGcYY=",
   "success": true,
-  "projectFilePath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Week-1\\LibraryKata\\LibraryKata.App\\LibraryKata.App.csproj",
-  "expectedPackageFiles": [],
+  "projectFilePath": "C:\\Users\\luis0\\OneDrive\\Documentos\\jakartaee-hello-world\\luis-hernandez\\Demos\\Week-1\\LibraryKata\\LibraryKata.App\\LibraryKata.App.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\luis0\\.nuget\\packages\\serilog\\4.3.1\\serilog.4.3.1.nupkg.sha512",
+    "C:\\Users\\luis0\\.nuget\\packages\\serilog.sinks.console\\6.1.1\\serilog.sinks.console.6.1.1.nupkg.sha512"
+  ],
   "logs": []
 }
