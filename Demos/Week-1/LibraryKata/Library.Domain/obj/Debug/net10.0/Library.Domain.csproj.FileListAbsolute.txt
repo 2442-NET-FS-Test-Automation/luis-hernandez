@@ -22,3 +22,4 @@ C:\Users\luis0\OneDrive\Documentos\jakartaee-hello-world\luis-hernandez\Demos\We
 C:\Users\luis0\OneDrive\Documentos\jakartaee-hello-world\luis-hernandez\Demos\Week-1\LibraryKata\Library.Domain\obj\Debug\net10.0\refint\Library.Domain.dll
 C:\Users\luis0\OneDrive\Documentos\jakartaee-hello-world\luis-hernandez\Demos\Week-1\LibraryKata\Library.Domain\obj\Debug\net10.0\Library.Domain.pdb
 C:\Users\luis0\OneDrive\Documentos\jakartaee-hello-world\luis-hernandez\Demos\Week-1\LibraryKata\Library.Domain\obj\Debug\net10.0\ref\Library.Domain.dll
+C:\Users\luis0\OneDrive\Documentos\jakartaee-hello-world\luis-hernandez\Demos\Week-1\LibraryKata\Library.Domain\obj\Debug\net10.0\Library.Domain.csproj.AssemblyReference.cache

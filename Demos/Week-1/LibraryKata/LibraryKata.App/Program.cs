@@ -1,5 +1,6 @@
 ﻿// If I have code from another namespace that I wannt to use her - I use a using satatement to import it.
 using System.Data.Common;
+using System.Globalization;
 using Library.Domain;
 using Libraryaa.Domain;
 using LibraryKata.Domain;
@@ -13,7 +14,7 @@ public class Program
     // public - accessible across the program
     // static - Main can be called upon without a Program object. It is a Static/class method. 
     // void - it doesn't return anything
-    public static void Main()
+    public static async Task Main()
     {
         //Lets configure Serilog here before any code execution
         //Serilog works via a singleton object. Its shared globally
@@ -25,6 +26,8 @@ public class Program
 
 
         Program.ExceptionDemo();
+        Program.AdvancedClassDemo();
+        await Program.AsyncHttpDemo();
 
         Log.CloseAndFlush();
     }
@@ -317,9 +320,83 @@ public class Program
 
     public static void Borrow(Book book)
     {
-        if(!book.Checkout())
+        if (!book.Checkout())
         {
             throw new ItemNotAvailableException(book.Title);
         }
+    }
+
+    public static void AdvancedClassDemo()
+    {
+        Console.WriteLine("\n == Advanced classes ==");
+
+        //First, a quick detour, lets interact with GC
+        Console.WriteLine(GC.GetTotalMemory(forceFullCollection: false) / 1024);
+
+        ILibraryRepository repo = new InMemoryLibraryRepository();
+
+        LibraryItem dune = LibraryItemFactory.Create(ItemKind.Book, "Dune", "Frank Herbert", copies: 3);
+
+        repo.Add(dune);
+
+        repo.Add(LibraryItemFactory.Create(ItemKind.Magazine, "Wired", "Axel", copies: 2));
+        repo.Add(LibraryItemFactory.Create(ItemKind.Magazine, "Dune Messiah", "Frank Herbert", copies: 2));
+        repo.Add(LibraryItemFactory.Create(ItemKind.ReferenceBook, "C# Language Reference", "Microsoft", copies: 3));
+
+        Catalog catalog = new();
+
+        foreach (LibraryItem item in repo.GetAll())
+        {
+            catalog.Add(item);
+        }
+
+        Console.WriteLine($"We have  {catalog.Authors.Count} unique authors in our catalog");
+
+        foreach (string author in catalog.Authors)
+        {
+            Console.WriteLine(author);
+        }
+
+        // lets search out catalog now that it's backed by a dictionary
+        //lets use our Find() method
+        List<LibraryItem> byFrankHerbert = catalog.Find(item => item.Author == "Frank Herbert");
+        Console.WriteLine($"There are {byFrankHerbert.Count} book by Frank Herbert");
+
+        // lets se how many items in the catalog are lendable
+        Console.WriteLine("We have a mix of lendable and non-lndable items");
+
+        foreach (LibraryItem item in catalog.lendable())
+        {
+            Console.WriteLine($"{item.Title}");
+        }
+    }
+    
+    public static async Task AsyncHttpDemo()
+    {
+        //We wrote our client object to lets use it
+        OpenLibreryClient client = new();
+
+        string[] isbns = { "9780132350884", "9780201633610" };
+
+        //I want to fetch the data from OpenLibrary for both ISBNs
+        Task<LibraryItem?>[] fetchedBooks = new Task<LibraryItem?>[isbns.Length];
+
+        for (int i = 0; i < isbns.Length; i++)
+        {
+            fetchedBooks[i] = client.FetchByIsbnAsync(isbns[i]);
+        }
+
+        //If we ONLY wanted one book, and we just had one isbn, we could do something like the following
+        //foundBook = await client.FetchByIsbnAsync("1234567890123")
+
+
+        //Using WhenAll to do concurrent fetching. we dont await EVERY SINGLE call one by one
+        //Is doing in one batch instead of one at at time
+        LibraryItem?[] foundBooks = await Task.WhenAll(fetchedBooks);
+
+        //To be safe, we can use a quick ternary operator. Like a quick if-else check
+        LibraryItem? firstBookFound = foundBooks.Length > 0 ? foundBooks[0] : null;
+
+        Console.WriteLine($"Fetched: {firstBookFound?.Describe() ?? "nothing"}");
     }
 }
