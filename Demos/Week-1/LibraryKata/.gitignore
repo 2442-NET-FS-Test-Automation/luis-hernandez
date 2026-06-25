@@ -1,0 +1,8 @@
+# Generated metadata in object files
+obj/
+obj/**
+# Generated metadata in bin files
+bin/
+bin/**
+# Ignore Visual Studio temporary files
+.vs/
