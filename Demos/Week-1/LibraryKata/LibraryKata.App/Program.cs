@@ -14,7 +14,7 @@ public class Program
     // public - accessible across the program
     // static - Main can be called upon without a Program object. It is a Static/class method. 
     // void - it doesn't return anything
-    public static void Main()
+    public static async Task Main()
     {
         //Lets configure Serilog here before any code execution
         //Serilog works via a singleton object. Its shared globally
@@ -27,7 +27,7 @@ public class Program
 
         Program.ExceptionDemo();
         Program.AdvancedClassDemo();
-        
+        await Program.AsyncHttpDemo();
 
         Log.CloseAndFlush();
     }
@@ -325,7 +325,7 @@ public class Program
             throw new ItemNotAvailableException(book.Title);
         }
     }
-    
+
     public static void AdvancedClassDemo()
     {
         Console.WriteLine("\n == Advanced classes ==");
@@ -365,8 +365,38 @@ public class Program
         // lets se how many items in the catalog are lendable
         Console.WriteLine("We have a mix of lendable and non-lndable items");
 
-        foreach(LibraryItem item in catalog.lendable()){
+        foreach (LibraryItem item in catalog.lendable())
+        {
             Console.WriteLine($"{item.Title}");
         }
+    }
+    
+    public static async Task AsyncHttpDemo()
+    {
+        //We wrote our client object to lets use it
+        OpenLibreryClient client = new();
+
+        string[] isbns = { "9780132350884", "9780201633610" };
+
+        //I want to fetch the data from OpenLibrary for both ISBNs
+        Task<LibraryItem?>[] fetchedBooks = new Task<LibraryItem?>[isbns.Length];
+
+        for (int i = 0; i < isbns.Length; i++)
+        {
+            fetchedBooks[i] = client.FetchByIsbnAsync(isbns[i]);
+        }
+
+        //If we ONLY wanted one book, and we just had one isbn, we could do something like the following
+        //foundBook = await client.FetchByIsbnAsync("1234567890123")
+
+
+        //Using WhenAll to do concurrent fetching. we dont await EVERY SINGLE call one by one
+        //Is doing in one batch instead of one at at time
+        LibraryItem?[] foundBooks = await Task.WhenAll(fetchedBooks);
+
+        //To be safe, we can use a quick ternary operator. Like a quick if-else check
+        LibraryItem? firstBookFound = foundBooks.Length > 0 ? foundBooks[0] : null;
+
+        Console.WriteLine($"Fetched: {firstBookFound?.Describe() ?? "nothing"}");
     }
 }
