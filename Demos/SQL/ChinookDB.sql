@@ -146,7 +146,7 @@ WHERE CustomerId = (
     FROM dbo.Invoice i
     GROUP BY i.CustomerId
     ORDER BY MAX(i.Total) DESC
-)
+);
 -- Who is the highest spending customer?
 SELECT FirstName + ' ' + LastName AS Customer
 FROM dbo.Customer
@@ -156,16 +156,37 @@ WHERE CustomerId = (
     FROM dbo.Invoice i
     GROUP BY i.CustomerId
     ORDER BY SUM(i.Total) DESC
-    )
+);
 
 -- Return the email and full name of of all customers who listen to Rock.
-
+SELECT DISTINCT c.Email, (c.FirstName + ' ' + c.LastName) AS FullName
+FROM dbo.Customer c
+JOIN dbo.Invoice i ON c.CustomerId = i.CustomerId
+JOIN dbo.InvoiceLine il ON i.InvoiceId = il.InvoiceId
+JOIN dbo.Track t ON il.TrackId = t.TrackId
+JOIN dbo.Genre g ON t.GenreId = g.GenreId
+WHERE g.Name LIKE 'Rock';
 
 -- Which artist has written the most Rock songs?
-
+SELECT TOP 1 a.Name, COUNT(*) AS RockSongs
+FROM Artist a
+JOIN Album ab ON a.ArtistId = ab.ArtistId
+JOIN dbo.Track t ON ab.AlbumId = t.AlbumId
+JOIN dbo.Genre g ON t.GenreId = g.GenreId
+WHERE g.Name LIKE 'Rock'
+GROUP BY a.Name
+ORDER BY COUNT(*) DESC;
 
 -- Which artist has generated the most revenue?
-
+SELECT TOP 1
+    a.Name, SUM(i.Total) Revenue
+FROM Artist a
+    JOIN Album al ON a.ArtistId = al.ArtistId
+    JOIN Track t ON al.AlbumId = t.AlbumId
+    JOIN InvoiceLine il ON t.TrackId = il.TrackId
+    JOIN Invoice i ON il.InvoiceId = i.InvoiceId
+GROUP BY a.Name
+ORDER BY SUM(i.Total) DESC;
 
 
 
