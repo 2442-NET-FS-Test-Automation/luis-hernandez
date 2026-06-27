@@ -196,28 +196,54 @@ ORDER BY SUM(i.Total) DESC;
 -- plan for them is the same, or different.
 
 -- 1. which artists did not make any albums at all?
+SELECT a.ArtistId, a.Name
+FROM dbo.Artist a
+WHERE a.ArtistId NOT IN
+(SELECT DISTINCT a.ArtistId
+FROM dbo.Artist a
+    JOIN Album ab ON a.ArtistId = ab.ArtistId);
 
+SELECT a.ArtistId, a.Name
+FROM Artist a
+LEFT JOIN dbo.Album ab ON a.ArtistId = ab.ArtistId
+WHERE ab.AlbumId IS NULL;
 
 -- 2. which artists did not record any tracks of the Latin genre?
-
+SELECT DISTINCT a.Name, g.Name
+FROM dbo.Artist a
+JOIN dbo.Album ab ON a.ArtistId = ab.ArtistId
+JOIN dbo.Track t ON ab.AlbumId = t.AlbumId
+JOIN dbo.Genre g ON t.GenreId = g.GenreId
+WHERE g.Name NOT LIKE 'Latin';
 
 -- 3. which video track has the longest length? (use media type table)
-
-
-
+SELECT TOP 1 sq.TrackId, sq.Milliseconds  
+FROM 
+(SELECT t.TrackId, t.Milliseconds 
+FROM dbo.Track t
+JOIN dbo.MediaType mt ON t.MediaTypeId = mt.MediaTypeId
+WHERE mt.Name LIKE '%Video%') AS sq
+ORDER BY sq.Milliseconds DESC;
 -- 4. boss employee (the one who reports to nobody)
-
+SELECT EmployeeId, LastName, FirstName  FROM dbo.Employee WHERE ReportsTo IS NULL;
 
 -- 5. how many audio tracks were bought by German customers, and what was
 --    the total price paid for them?
-
+SELECT COUNT (*) AS German_Customers_Audio_Total_Purchases
+FROM dbo.Invoice i
+    JOIN dbo.Customer c ON i.CustomerId = c.CustomerId
+    JOIN dbo.InvoiceLine il ON i.InvoiceId = il.InvoiceId
+    JOIN dbo.Track t ON il.TrackId = t.TrackId
+    JOIN dbo.MediaType mt ON t.MediaTypeId = mt.MediaTypeId
+WHERE c.Country LIKE 'Germany' AND mt.Name LIKE '%Audio%'
 
 
 -- 6. list the names and countries of the customers supported by an employee
---    who was hired younger than 35.
-
-
-
+--    who was hired younger than 45.
+SELECT c.FirstName, c.LastName, c.Country
+FROM dbo.Customer c
+    JOIN dbo.Employee e ON c.SupportRepId = e.EmployeeId
+WHERE DATEDIFF(year, e.BirthDate, GETDATE()) < 55
 
 -- DML exercises
 
