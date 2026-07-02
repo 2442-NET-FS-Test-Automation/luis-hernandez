@@ -14,10 +14,14 @@ public class LibraryDbContext : DbContext
     //We ourselves will never call this constructor. ASP .NET's DI Container will do it for us
     public LibraryDbContext(DbContextOptions<LibraryDbContext> options) : base(options) { }
 
-    //We need to tell oir DbContext what C# classes we are tracking as Entities
-    //Reminder - these Entitites becoume our tables. We register the entitites here.
+    //We need to tell our DbContext what C# classes we are tracking as Entities
+    //Reminder - these Entities become our tables. We register the entities here.
     public DbSet<Product> Products => Set<Product>();
     public DbSet<InventoryItem> Inventory => Set<InventoryItem>();
+    public DbSet<Order> Orders => Set<Order>();
+    public DbSet<OrderLine> OrderLines => Set<OrderLine>();
+    public DbSet<Customer> Customers => Set<Customer>();
+    public DbSet<FulfillmentEvent> FulfillmentEvents => Set<FulfillmentEvent>();
 
     //If I want to do things like deepear configurations options or data seeding
     //I can override a method we inherited from DbContext
@@ -40,6 +44,13 @@ public class LibraryDbContext : DbContext
                 .HasForeignKey<InventoryItem>(i => i.ProductId);
         });
 
+        // Setting our RowVersion property as an EF Core Row Version
+        b.Entity<InventoryItem>().Property(i => i.RowVersion).IsRowVersion();
+
+        //This order operations, setting string length and then telling DB that a columns is unique is specific to string +  SQL Server.
+        b.Entity<Customer>().Property(c => c.Email).HasMaxLength(256);
+        b.Entity<Customer>().HasIndex(c => c.Email).IsUnique();
+
         //After you configure your entities
         //we can use OnModelCreating to seed data
         b.Entity<Product>().HasData(
@@ -52,6 +63,14 @@ public class LibraryDbContext : DbContext
             new InventoryItem { Id = 1, ProductId = 1, CurrentStock = 5 },
             new InventoryItem { Id = 2, ProductId = 2, CurrentStock = 5 },
             new InventoryItem { Id = 3, ProductId = 3, CurrentStock = 5 }
+        );
+
+        //HasData runs inside the migration BEFORE SQL Server can hand our identity keys
+        //Which is why we give explicit PK's when seeding
+        b.Entity<Customer>().HasData(
+            new Customer { Id = 1, Name = "Ada Lovelace", Email = "ada@example.com" },
+
+            new Customer { Id = 2, Name = "Alan Turing", Email = "alan@example.com" }
         );
     }
 }

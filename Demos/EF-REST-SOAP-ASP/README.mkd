@@ -1,0 +1,948 @@
+# 📚 Demo Recipes for My Project
+
+# 📅 Día 1 
+Esta sección contiene la receta de comandos, arquitectura y configuraciones iniciales del **Día 1 de la Kata**. Mapea la creación de una solución limpia en **.NET 10** utilizando una arquitectura separada (**API + Data/Domain**) con **Entity Framework Core**.
+
+---
+
+# 🛠️ Paso 1: Inicialización del Entorno y la Solución
+
+Ejecuta los siguientes comandos para crear la estructura base del proyecto.
+
+> 💡 **Objetivo:** Crear la solución, los proyectos y establecer las referencias entre ellos.
+
+```bash
+# 1. Crear un nuevo directorio e ingresar a él
+mkdir Library-api-minimal
+cd Library-api-minimal
+
+# 2. Crear una nueva solución (.sln)
+dotnet new sln -n library-fufillment
+
+# 3. Crear el proyecto de Biblioteca de Clases (Dominio / Datos)
+dotnet new classlib -n Library.Data -f net10.0
+
+# 4. Crear el proyecto ASP.NET Core Minimal API
+dotnet new web -n Library.Api -f net10.0
+
+# 5. Agregar ambos proyectos a la solución
+dotnet sln add Library.Data Library.Api
+
+# 6. Agregar la referencia del proyecto
+# La API depende de la capa de Datos
+dotnet add Library.Api reference Library.Data
+
+# 7. Instalar Entity Framework CLI (si aún no está instalado)
+dotnet tool install --global dotnet-ef
+
+# 8. Crear un .gitignore para proyectos .NET
+dotnet new gitignore
+```
+
+---
+
+# 📦 Paso 2: Instalación de paquetes NuGet
+
+Instala las dependencias necesarias para trabajar con:
+
+- SQL Server
+- Entity Framework Core
+- Migraciones
+- Swagger/OpenAPI
+
+## Library.Data
+
+```bash
+dotnet add Library.Data package Microsoft.EntityFrameworkCore.SqlServer
+dotnet add Library.Data package Microsoft.EntityFrameworkCore.Design
+```
+
+## Library.Api
+
+```bash
+dotnet add Library.Api package Microsoft.EntityFrameworkCore.SqlServer
+dotnet add Library.Api package Microsoft.EntityFrameworkCore.Design
+
+# Documentación automática de Endpoints
+dotnet add Library.Api package Swashbuckle.AspNetCore
+```
+
+---
+
+# 📐 Paso 3: Arquitectura y Modelado de Datos
+
+## 💡 Concepto clave: Separar el concepto del inventario
+
+Evita que una misma entidad represente tanto la definición del producto como su existencia física.
+
+|Entidad|Responsabilidad|
+|-------|---------------|
+|`Product`|Representa el concepto del producto (Título, Autor, ISBN, Precio, etc.)|
+|`InventoryItem`|Representa una unidad física existente dentro del inventario.|
+
+Esta separación hace que el modelo sea más flexible y escalable.
+
+---
+
+## Restricciones (Constraints)
+
+Para propiedades monetarias utiliza siempre una precisión explícita.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+
+public class Product
+{
+    public int Id { get; set; }
+
+    // Precisión: 10 dígitos totales y 2 decimales
+    [Precision(10, 2)]
+    public decimal Price { get; set; }
+}
+```
+
+---
+
+# 🗄️ Paso 4: Crear el DbContext
+
+El `DbContext` es el componente encargado de:
+
+- Traducir objetos C# a consultas SQL.
+- Administrar conexiones.
+- Realizar seguimiento de cambios.
+- Ejecutar operaciones CRUD.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+
+public class LibraryDbContext : DbContext
+{
+    public LibraryDbContext(DbContextOptions<LibraryDbContext> options)
+        : base(options)
+    {
+    }
+
+    public DbSet<Product> Products { get; set; }
+
+    public DbSet<InventoryItem> Inventory { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        // Configuración Fluent API
+        // Relaciones
+        // Índices
+        // Restricciones
+        // Data Seeding
+    }
+}
+```
+
+---
+
+# 🚀 Paso 5: Configuración de `Program.cs`
+
+En Minimal API el archivo `Program.cs` se divide conceptualmente en dos partes.
+
+## 1️⃣ Builder
+
+Aquí se registran todos los servicios.
+
+```csharp
+using Library.Data;
+using Microsoft.EntityFrameworkCore;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Swagger
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+// Registro del DbContext
+// builder.Services.AddDbContext<LibraryDbContext>(options =>
+//      options.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
+```
+
+---
+
+## 2️⃣ Pipeline
+
+Aquí se configuran los middlewares y posteriormente los endpoints.
+
+```csharp
+var app = builder.Build();
+
+app.UseSwagger();
+app.UseSwaggerUI();
+```
+
+---
+
+## Endpoint básico
+
+```csharp
+app.MapGet("/", () => "Hello World!");
+```
+
+---
+
+## Obtener todo el inventario
+
+```csharp
+app.MapGet("/inventory", async (LibraryDbContext db) =>
+{
+    return await db.Inventory.ToListAsync();
+});
+```
+
+---
+
+## Consulta usando LINQ
+
+```csharp
+app.MapGet("/inventory/by-value", (LibraryDbContext db) =>
+{
+    return db.Inventory
+        .Include(i => i.Product)
+        .GroupBy(i => i.CurrentStock >= 5
+            ? "well-stocked"
+            : "low")
+        .Select(g => new
+        {
+            tier = g.Key,
+            count = g.Count(),
+            units = g.Sum(i => i.CurrentStock)
+        })
+        .ToList();
+});
+```
+
+### 💡 Concepto: LINQ
+
+**LINQ (Language Integrated Query)** permite consultar colecciones usando sintaxis de C#.
+
+Algunas ventajas:
+
+- Es fuertemente tipado.
+- Se traduce automáticamente a SQL cuando se utiliza con EF Core.
+- Permite construir consultas dinámicamente.
+- Facilita operaciones como:
+
+  - `Where`
+  - `Select`
+  - `GroupBy`
+  - `OrderBy`
+  - `Include`
+  - `Join`
+  - `Any`
+  - `Count`
+  - `Sum`
+
+La consulta realmente se ejecuta cuando se materializa mediante métodos como:
+
+```csharp
+ToList()
+ToListAsync()
+First()
+FirstAsync()
+Single()
+Count()
+Any()
+```
+
+Finalmente la aplicación se inicia con:
+
+```csharp
+app.Run();
+```
+
+---
+
+# 🔄 Paso 6: Pipeline de Migraciones
+
+> ⚠️ **Importante**
+>
+> Todos los comandos deben ejecutarse desde la carpeta donde se encuentra el archivo **.sln**.
+
+## Crear la primera migración
+
+```bash
+dotnet ef migrations add Init \
+    --project Library.Data \
+    --startup-project Library.Api
+```
+
+---
+
+## Aplicar la migración
+
+```bash
+dotnet ef database update \
+    --project Library.Data \
+    --startup-project Library.Api
+```
+
+---
+
+## Crear nuevas migraciones
+
+Cada vez que modifiques el modelo de datos:
+
+- nuevas entidades
+- relaciones
+- índices
+- restricciones
+- Data Seeding
+
+crea una nueva migración.
+
+```bash
+dotnet ef migrations add DataSeeded \
+    --project Library.Data \
+    --startup-project Library.Api
+```
+
+---
+
+# 📌 Resumen del flujo de trabajo
+
+```text
+Crear solución
+        │
+        ▼
+Crear proyectos
+        │
+        ▼
+Agregar referencias
+        │
+        ▼
+Instalar paquetes
+        │
+        ▼
+Crear entidades
+        │
+        ▼
+Crear DbContext
+        │
+        ▼
+Registrar servicios
+        │
+        ▼
+Crear Endpoints
+        │
+        ▼
+Crear migración
+        │
+        ▼
+Actualizar Base de Datos
+        │
+        ▼
+Ejecutar la API
+```
+
+---
+
+# ✅ Resultado
+
+Al finalizar este proceso tendrás una solución organizada con:
+
+- 📁 **Library.Api**
+  - Minimal API
+  - Swagger
+  - Endpoints
+
+- 📁 **Library.Data**
+  - Entidades
+  - DbContext
+  - Migraciones
+  - Acceso a datos mediante EF Core
+
+Todo listo para comenzar a implementar la lógica de negocio.
+
+# 📅 Día 2: Modelado Avanzado, Concurrencia y Diagnóstico
+
+En esta etapa se amplía el dominio de la aplicación incorporando:
+
+- Nuevas entidades para el procesamiento de órdenes.
+- Uso de **Enums** para representar estados y prioridades.
+- Configuración avanzada mediante **Fluent API**.
+- Restricciones e índices únicos.
+- Manejo de **Concurrencia Optimista** con **RowVersion**.
+- Endpoints de diagnóstico para comprender el funcionamiento interno de **Entity Framework Core**.
+
+---
+
+# 📐 Paso 7: Nuevas Entidades del Dominio (`Library.Data`)
+
+Agrega las siguientes clases a la capa de datos para soportar el flujo de órdenes y clientes.
+
+## Estados de una Orden
+
+```csharp
+namespace Library.Data;
+
+public enum Status
+{
+    // Una orden recién creada inicia pendiente
+    Pending,
+
+    // La orden fue procesada correctamente
+    Fulfilled,
+
+    // No pudo completarse por falta de inventario
+    Backordered
+}
+```
+
+---
+
+## Prioridad de Procesamiento
+
+```csharp
+namespace Library.Data;
+
+public enum Priority
+{
+    // Valor por defecto
+    Normal = 0,
+
+    // Procesamiento urgente
+    Expedited = 1
+}
+```
+
+> 💡 **Nota**
+>
+> Los `enum` se almacenan por defecto como valores enteros (`0`, `1`, `2`, ...).
+>
+> Asignar explícitamente sus valores resulta útil cuando:
+>
+> - Se requiere mantener compatibilidad.
+> - Se realizan comparaciones numéricas.
+> - Se desea controlar el orden de prioridad.
+
+---
+
+## Entidad `Customer`
+
+```csharp
+namespace Library.Data;
+
+public class Customer
+{
+    public int Id { get; set; }
+
+    public string Name { get; set; } = default!;
+
+    public string Email { get; set; } = default!;
+
+    // Un cliente puede tener muchas órdenes
+    public List<Order> Orders { get; set; } = new();
+}
+```
+
+---
+
+## Entidad `Order`
+
+```csharp
+namespace Library.Data;
+
+public class Order
+{
+    public int Id { get; set; }
+
+    // Foreign Key explícita
+    public int CustomerId { get; set; }
+
+    public Customer Customer { get; set; } = default!;
+
+    public Priority Priority { get; set; }
+
+    public Status Status { get; set; }
+
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+
+    public DateTime? CompletedUtc { get; set; }
+
+    // Una orden contiene múltiples líneas
+    public List<OrderLine> Lines { get; set; } = new();
+}
+```
+
+### 💡 Buena práctica
+
+Expón siempre la **Foreign Key** además de la propiedad de navegación.
+
+```csharp
+public int CustomerId { get; set; }
+
+public Customer Customer { get; set; } = default!;
+```
+
+Esto permite:
+
+- Consultas más eficientes.
+- Evitar cargar entidades completas.
+- Actualizaciones sencillas utilizando únicamente el identificador.
+
+---
+
+## Entidad `OrderLine`
+
+```csharp
+namespace Library.Data;
+
+public class OrderLine
+{
+    public int Id { get; set; }
+
+    public int OrderId { get; set; }
+
+    public int ProductId { get; set; }
+
+    public int Quantity { get; set; }
+}
+```
+
+---
+
+## Entidad `FulfillmentEvent`
+
+```csharp
+namespace Library.Data;
+
+public class FulfillmentEvent
+{
+    public int Id { get; set; }
+
+    public int OrderId { get; set; }
+
+    public string Type { get; set; } = default!;
+
+    public DateTime FulfilledAtUtc { get; set; } = DateTime.UtcNow;
+}
+```
+
+### 💡 ¿Por qué utilizar `= default!`?
+
+```csharp
+public string Type { get; set; } = default!;
+```
+
+Esta expresión:
+
+- Elimina advertencias del compilador sobre referencias nulas.
+- Indica que EF Core inicializará la propiedad.
+- Provoca que la columna se genere como **NOT NULL** en la base de datos.
+
+---
+
+# 🗄️ Paso 8: Actualizar `LibraryDbContext`
+
+Registra los nuevos `DbSet` y configura restricciones utilizando **Fluent API**.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+
+namespace Library.Data;
+
+public class LibraryDbContext : DbContext
+{
+    public LibraryDbContext(DbContextOptions<LibraryDbContext> options)
+        : base(options)
+    {
+    }
+
+    public DbSet<Product> Products { get; set; }
+
+    public DbSet<InventoryItem> Inventory { get; set; }
+
+    public DbSet<Order> Orders => Set<Order>();
+
+    public DbSet<OrderLine> OrderLines => Set<OrderLine>();
+
+    public DbSet<Customer> Customers => Set<Customer>();
+
+    public DbSet<FulfillmentEvent> FulfillmentEvents => Set<FulfillmentEvent>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        // Configuración de concurrencia
+        modelBuilder.Entity<InventoryItem>()
+            .Property(i => i.RowVersion)
+            .IsRowVersion();
+
+        // Restricción de longitud
+        modelBuilder.Entity<Customer>()
+            .Property(c => c.Email)
+            .HasMaxLength(256);
+
+        // Índice único
+        modelBuilder.Entity<Customer>()
+            .HasIndex(c => c.Email)
+            .IsUnique();
+    }
+}
+```
+
+---
+
+## Agregar `RowVersion` a `InventoryItem`
+
+```csharp
+public class InventoryItem
+{
+    public int Id { get; set; }
+
+    public int CurrentStock { get; set; }
+
+    public int ProductId { get; set; }
+
+    public Product Product { get; set; } = default!;
+
+    // Control de concurrencia optimista
+    public byte[] RowVersion { get; set; } = default!;
+}
+```
+
+---
+
+# 💡 ¿Qué es `RowVersion`?
+
+`RowVersion` es una columna especial administrada automáticamente por SQL Server.
+
+Cada vez que una fila cambia:
+
+```text
+Actualización 1 -> RowVersion = 1
+
+Actualización 2 -> RowVersion = 2
+
+Actualización 3 -> RowVersion = 3
+```
+
+EF Core utiliza este valor para detectar si otro proceso modificó la misma fila antes de guardar los cambios.
+
+Si el valor cambió, se lanza una:
+
+```text
+DbUpdateConcurrencyException
+```
+
+---
+
+# 🔒 Restricciones configuradas
+
+## Longitud máxima
+
+```csharp
+.Property(c => c.Email)
+.HasMaxLength(256);
+```
+
+Genera una columna similar a:
+
+```sql
+nvarchar(256)
+```
+
+---
+
+## Índice único
+
+```csharp
+.HasIndex(c => c.Email)
+.IsUnique();
+```
+
+Impide almacenar dos clientes con el mismo correo.
+
+```text
+✔ juan@email.com
+
+✔ maria@email.com
+
+✖ juan@email.com
+```
+
+---
+
+# 🔬 Paso 9: Endpoints de Diagnóstico (`/peek`)
+
+> ⚠️ **Importante**
+>
+> Los endpoints bajo `/peek` tienen únicamente fines educativos para comprender el comportamiento interno de Entity Framework Core.
+>
+> **No deben exponerse en producción.**
+
+---
+
+## Endpoint 1: Change Tracker
+
+```csharp
+app.MapGet("/peek/tracking", (LibraryDbContext db) =>
+{
+    var unchanged = db.Products.First();
+
+    var modified = db.Products.Skip(1).First();
+
+    modified.Price += 1;
+
+    db.Products.Add(new Product
+    {
+        Sku = "BK-TMP",
+        Name = "Tmp",
+        Price = 1m
+    });
+
+    var states = db.ChangeTracker
+        .Entries()
+        .Select(e => new
+        {
+            entity = e.Entity.GetType().Name,
+            state = e.State.ToString()
+        })
+        .ToList();
+
+    db.SaveChanges();
+
+    db.ChangeTracker.Clear();
+
+    return states;
+});
+```
+
+---
+
+## ¿Qué demuestra este endpoint?
+
+El **Change Tracker** mantiene el estado de todas las entidades cargadas en memoria.
+
+Estados posibles:
+
+|Estado|Descripción|
+|------|-----------|
+|`Detached`|No pertenece al contexto|
+|`Unchanged`|Leída sin modificaciones|
+|`Modified`|Se modificó alguna propiedad|
+|`Added`|Se insertará|
+|`Deleted`|Se eliminará|
+
+Ejemplo:
+
+```text
+Product          -> Unchanged
+
+Product          -> Modified
+
+Product          -> Added
+```
+
+Después de ejecutar:
+
+```csharp
+db.SaveChanges();
+```
+
+EF Core:
+
+1. Genera las consultas SQL.
+2. Actualiza la base de datos.
+3. Sincroniza los estados.
+
+Finalmente:
+
+```csharp
+db.ChangeTracker.Clear();
+```
+
+libera toda la memoria asociada al seguimiento de entidades.
+
+---
+
+# Endpoint 2: Simulación de Concurrencia
+
+```csharp
+app.MapGet("/peek/conflict", (IServiceScopeFactory scopes) =>
+{
+    using var scopeA = scopes.CreateScope();
+    using var scopeB = scopes.CreateScope();
+
+    var firstDb = scopeA.ServiceProvider.GetRequiredService<LibraryDbContext>();
+    var secondDb = scopeB.ServiceProvider.GetRequiredService<LibraryDbContext>();
+
+    var firstInventory = firstDb.Inventory.First(i => i.Id == 1);
+
+    var secondInventory = secondDb.Inventory.First(i => i.Id == 1);
+
+    firstInventory.CurrentStock--;
+
+    firstDb.SaveChanges();
+
+    secondInventory.CurrentStock--;
+
+    try
+    {
+        secondDb.SaveChanges();
+    }
+    catch (DbUpdateConcurrencyException ex)
+    {
+        var entry = ex.Entries.Single();
+
+        var current = entry.GetDatabaseValues();
+
+        entry.OriginalValues.SetValues(current!);
+
+        ((InventoryItem)entry.Entity).CurrentStock =
+            current!.GetValue<int>(nameof(InventoryItem.CurrentStock)) - 1;
+
+        secondDb.SaveChanges();
+    }
+
+    return Results.Ok("Conflict caught, reloaded and retried.");
+});
+```
+
+---
+
+# 💡 ¿Qué ocurre internamente?
+
+Se simulan dos peticiones HTTP independientes.
+
+```text
+        Base de Datos
+
+             │
+     ┌───────┴────────┐
+     │                │
+ Scope A          Scope B
+ DbContext        DbContext
+```
+
+Ambos contextos leen el mismo registro.
+
+```text
+Stock = 10
+
+RowVersion = 1
+```
+
+---
+
+## Primer contexto
+
+```text
+Stock = 9
+
+RowVersion = 2
+```
+
+La actualización se realiza correctamente.
+
+---
+
+## Segundo contexto
+
+Todavía conserva:
+
+```text
+Stock = 10
+
+RowVersion = 1
+```
+
+Cuando intenta guardar:
+
+```csharp
+secondDb.SaveChanges();
+```
+
+EF Core detecta que el `RowVersion` ya cambió y lanza:
+
+```text
+DbUpdateConcurrencyException
+```
+
+---
+
+# Estrategia de resolución
+
+El ejemplo implementa el patrón:
+
+```text
+Capturar
+
+↓
+
+Recargar
+
+↓
+
+Resolver
+
+↓
+
+Reintentar
+```
+
+Paso por paso:
+
+```csharp
+var current = entry.GetDatabaseValues();
+```
+
+Obtiene los datos más recientes desde SQL Server.
+
+---
+
+```csharp
+entry.OriginalValues.SetValues(current!);
+```
+
+Actualiza el `RowVersion` almacenado por EF Core.
+
+---
+
+```csharp
+((InventoryItem)entry.Entity).CurrentStock =
+    current!.GetValue<int>(
+        nameof(InventoryItem.CurrentStock)
+    ) - 1;
+```
+
+Recalcula el nuevo stock usando el valor actualizado de la base de datos.
+
+---
+
+Finalmente:
+
+```csharp
+secondDb.SaveChanges();
+```
+
+La operación se ejecuta correctamente utilizando el nuevo `RowVersion`.
+
+---
+
+# 📌 Conceptos aprendidos
+
+Al finalizar este día habrás aprendido:
+
+- ✅ Modelado avanzado de entidades.
+- ✅ Relaciones uno a muchos.
+- ✅ Uso correcto de Enums.
+- ✅ Foreign Keys explícitas.
+- ✅ Fluent API.
+- ✅ Restricciones e índices únicos.
+- ✅ Change Tracker.
+- ✅ Estados de las entidades.
+- ✅ Concurrencia Optimista.
+- ✅ `RowVersion`.
+- ✅ Resolución de conflictos concurrentes.
+- ✅ Uso de múltiples `DbContext` mediante `IServiceScopeFactory`.
+
+Estos conceptos forman la base para construir aplicaciones escalables y seguras utilizando **Entity Framework Core**.
