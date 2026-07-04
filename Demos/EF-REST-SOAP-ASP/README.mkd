@@ -1597,3 +1597,2238 @@ Al finalizar este día habrás aprendido:
 - ✅ Arquitectura desacoplada y mantenible.
 
 Estos conceptos constituyen la base para desarrollar aplicaciones empresariales escalables utilizando **ASP.NET Core**, **Entity Framework Core** y **Serilog**.
+
+# 📅 Día 4: Procesamiento Concurrente y Benchmarks (Parte 1)
+
+Durante esta etapa el proyecto evoluciona de un procesamiento síncrono a una arquitectura preparada para manejar **múltiples órdenes concurrentes** de forma segura y escalable.
+
+Los objetivos principales de este día son:
+
+- Procesar órdenes de forma concurrente.
+- Evitar bloqueos durante las peticiones HTTP.
+- Utilizar colas thread-safe.
+- Desacoplar el procesamiento de las solicitudes del usuario.
+- Evitar sobreventa (**Oversell**) mediante concurrencia optimista.
+- Implementar una política automática de reintentos.
+
+---
+
+# 🚀 Objetivos del Día
+
+Al finalizar esta sección tendrás implementado:
+
+- ✅ Procesamiento en Background.
+- ✅ Cola de trabajos.
+- ✅ Workers concurrentes.
+- ✅ `BackgroundService`.
+- ✅ `Channel<T>`.
+- ✅ `PriorityQueue<T>`.
+- ✅ `ConcurrentQueue<T>`.
+- ✅ `IDbContextFactory`.
+- ✅ Reintentos automáticos por concurrencia.
+- ✅ Protección contra Overselling.
+
+---
+
+# 📦 Paso 14: Procesamiento Concurrente de Órdenes
+
+Hasta este momento cada petición HTTP procesaba completamente una orden.
+
+```text
+Cliente
+
+    │
+
+POST /orders
+
+    │
+
+Crear Orden
+
+    │
+
+Consultar Inventario
+
+    │
+
+Actualizar Stock
+
+    │
+
+Guardar
+
+    │
+
+Respuesta HTTP
+```
+
+Este modelo funciona correctamente para pocas peticiones, pero presenta problemas cuando llegan decenas o cientos de órdenes simultáneamente.
+
+---
+
+## Problema
+
+Si 100 clientes realizan compras al mismo tiempo:
+
+```text
+Cliente 1 ───────┐
+
+Cliente 2 ───────┤
+
+Cliente 3 ───────┤
+
+Cliente 4 ───────┤
+
+Cliente 5 ───────┘
+
+        ↓
+
+ASP.NET Core
+
+        ↓
+
+Todos intentan modificar
+el mismo inventario
+```
+
+Esto puede provocar:
+
+- Mayor contención.
+- Más conflictos de concurrencia.
+- Threads ocupados esperando I/O.
+- Mayor tiempo de respuesta.
+
+---
+
+# 💡 Solución
+
+Separar la recepción de la orden de su procesamiento.
+
+El endpoint únicamente:
+
+1. Recibe la solicitud.
+2. Encola un trabajo.
+3. Devuelve una respuesta inmediata.
+
+Mientras tanto, un proceso en segundo plano realiza el trabajo pesado.
+
+```text
+Cliente
+
+     │
+
+POST /orders
+
+     │
+
+ Encolar Trabajo
+
+     │
+
+HTTP 202 Accepted
+
+     │
+
+-------------------------
+
+Background Worker
+
+     │
+
+Procesar Orden
+
+     │
+
+Actualizar Inventario
+
+     │
+
+Guardar Cambios
+```
+
+Este patrón recibe el nombre de:
+
+> **Producer / Consumer Pattern**
+
+---
+
+# 🧵 ¿Por qué NO compartir un DbContext?
+
+Un error muy común consiste en reutilizar un mismo `DbContext` entre varios hilos.
+
+```text
+Thread A
+
+        │
+
+        ▼
+
+      DbContext
+
+        ▲
+
+        │
+
+Thread B
+```
+
+Esto es incorrecto.
+
+> ⚠️ **Entity Framework Core NO es Thread Safe.**
+
+Cada operación concurrente debe utilizar su propia instancia.
+
+La solución consiste en utilizar:
+
+```csharp
+IDbContextFactory<LibraryDbContext>
+```
+
+para crear un nuevo contexto por cada trabajo.
+
+---
+
+# 🏭 IDbContextFactory
+
+```csharp
+await using var db =
+    await factory.CreateDbContextAsync(ct);
+```
+
+Cada llamada devuelve:
+
+```text
+Trabajo 1
+
+    │
+
+DbContext #1
+
+-------------------
+
+Trabajo 2
+
+    │
+
+DbContext #2
+
+-------------------
+
+Trabajo 3
+
+    │
+
+DbContext #3
+```
+
+De esta manera no existe interferencia entre operaciones.
+
+---
+
+# 🧰 Opciones de Cola
+
+.NET ofrece varias estructuras para implementar colas concurrentes.
+
+Las tres más utilizadas son:
+
+- `PriorityQueue`
+- `Channel`
+- `ConcurrentQueue`
+
+Cada una resuelve un problema distinto.
+
+---
+
+# Opción 1: PriorityQueue
+
+`PriorityQueue<TElement,TPriority>` fue incorporada en .NET y permite ordenar elementos según una prioridad numérica.
+
+```csharp
+var queue =
+    new PriorityQueue<int,int>();
+
+queue.Enqueue(
+    orderIdExpedited,
+    (int)Priority.Expedited);
+
+queue.Enqueue(
+    orderIdNormal,
+    (int)Priority.Normal);
+
+int nextOrder = queue.Dequeue();
+```
+
+---
+
+## Funcionamiento
+
+Supongamos:
+
+```text
+Priority.Expedited = 0
+
+Priority.Normal = 1
+```
+
+La cola queda así:
+
+```text
+Enqueue
+
+Normal
+
+Expedited
+
+Normal
+
+Expedited
+```
+
+Internamente:
+
+```text
+Prioridad
+
+0
+
+0
+
+1
+
+1
+```
+
+Al desencolar:
+
+```text
+Sale primero:
+
+Expedited
+
+↓
+
+Expedited
+
+↓
+
+Normal
+
+↓
+
+Normal
+```
+
+---
+
+## ¿Cuándo utilizar PriorityQueue?
+
+Ideal cuando existen prioridades reales.
+
+Por ejemplo:
+
+- Clientes Premium.
+- Pedidos Urgentes.
+- Tickets críticos.
+- Procesamiento financiero.
+
+---
+
+# Opción 2: Channel<T>
+
+`Channel<T>` pertenece al paquete:
+
+```text
+System.Threading.Channels
+```
+
+Está diseñado específicamente para arquitecturas:
+
+- Producer / Consumer.
+- Background Workers.
+- Procesamiento Asíncrono.
+
+Es la opción recomendada para ASP.NET Core.
+
+---
+
+## Registro del Channel
+
+```csharp
+builder.Services.AddSingleton(_ =>
+    Channel.CreateBounded<int>(
+        new BoundedChannelOptions(100)
+        {
+            FullMode =
+                BoundedChannelFullMode.Wait
+        }));
+```
+
+También puede utilizarse un canal sin límite:
+
+```csharp
+builder.Services.AddSingleton(_ =>
+    Channel.CreateUnbounded<int>());
+```
+
+---
+
+# ¿Qué significa Bounded?
+
+El canal posee una capacidad máxima.
+
+```text
+Capacidad = 100
+```
+
+Visualmente:
+
+```text
+□□□□□□□□□□
+
+100 espacios
+```
+
+Cuando se llena:
+
+```text
+■■■■■■■■■■
+```
+
+El productor deberá esperar.
+
+Este comportamiento recibe el nombre de:
+
+> **Backpressure**
+
+---
+
+# ¿Qué es Backpressure?
+
+Supongamos:
+
+```text
+Productor
+
+1000 órdenes por segundo
+
+↓
+
+Canal
+
+Capacidad 100
+
+↓
+
+Worker
+
+50 órdenes por segundo
+```
+
+Sin límite:
+
+```text
+Memoria
+
+████████████████████████
+```
+
+Con Backpressure:
+
+```text
+Productor
+
+↓
+
+Esperar
+
+↓
+
+Canal
+
+↓
+
+Worker
+```
+
+Se evita el crecimiento infinito de memoria.
+
+---
+
+# BackgroundService
+
+El consumidor normalmente se implementa mediante:
+
+```csharp
+builder.Services.AddHostedService<
+    OrderProcessingService>();
+```
+
+Su responsabilidad consiste en leer continuamente el canal.
+
+```csharp
+await foreach (
+    var orderId
+    in channel.Reader.ReadAllAsync())
+{
+    ...
+}
+```
+
+---
+
+# Opción 3: ConcurrentQueue
+
+Otra alternativa es:
+
+```text
+ConcurrentQueue<T>
+```
+
+Es una cola FIFO completamente thread-safe.
+
+```text
+Entrada
+
+A
+
+B
+
+C
+
+D
+
+↓
+
+Salida
+
+A
+
+↓
+
+B
+
+↓
+
+C
+
+↓
+
+D
+```
+
+---
+
+## Ventajas
+
+- Muy rápida.
+- Thread-safe.
+- Lock-Free.
+
+---
+
+## Limitaciones
+
+No posee:
+
+- Prioridades.
+- Operaciones asíncronas.
+- Backpressure.
+
+Frecuentemente se combina con:
+
+- `SemaphoreSlim`
+- `Task`
+- `AutoResetEvent`
+
+---
+
+# Comparativa
+
+|Característica|PriorityQueue|Channel|ConcurrentQueue|
+|--------------|-------------|--------|----------------|
+|Prioridades|✅|❌|❌|
+|FIFO|❌|✅|✅|
+|Lectura asíncrona|❌|✅|❌|
+|Backpressure|❌|✅|❌|
+|Thread Safe|✅|✅|✅|
+|Ideal para|Procesamiento prioritario|Pipelines|Colas simples|
+
+---
+
+# ¿Cuál utilizar?
+
+## PriorityQueue
+
+```text
+Pedidos Express
+
+↓
+
+Procesar primero
+```
+
+---
+
+## Channel
+
+```text
+HTTP Request
+
+↓
+
+Canal
+
+↓
+
+Background Worker
+```
+
+Es la opción más utilizada en aplicaciones empresariales.
+
+---
+
+## ConcurrentQueue
+
+```text
+Cola simple
+
+↓
+
+Consumidor
+
+↓
+
+Procesamiento
+```
+
+Ideal para escenarios sencillos.
+
+---
+
+# Implementación con Channel
+
+## Registrar servicios
+
+```csharp
+builder.Services.AddSingleton(
+    _ => Channel.CreateUnbounded<int>());
+
+builder.Services.AddHostedService<
+    OrderProcessingService>();
+```
+
+---
+
+# Endpoint `/orders/burst`
+
+Este endpoint genera múltiples órdenes concurrentes.
+
+```csharp
+app.MapPost("/orders/burst",
+(
+    int n,
+    Channel<int> channel,
+    ILogger<Program> logger) =>
+{
+    logger.LogInformation(
+        "Encolando {Count} órdenes.", n);
+
+    for (int i = 1; i <= n; i++)
+    {
+        channel.Writer.TryWrite(i);
+    }
+
+    return Results.Accepted(
+        $"Procesando {n} órdenes.");
+});
+```
+
+---
+
+## Flujo del endpoint
+
+```text
+Cliente
+
+      │
+
+POST /orders/burst?n=50
+
+      │
+
+Encolar 50 IDs
+
+      │
+
+HTTP 202 Accepted
+
+      │
+
+Fin de la petición
+```
+
+---
+
+# BackgroundService
+
+```csharp
+public class OrderProcessingService
+    : BackgroundService
+{
+    private readonly Channel<int> _channel;
+
+    private readonly
+        IDbContextFactory<LibraryDbContext>
+        _factory;
+
+    private readonly
+        ILogger<OrderProcessingService>
+        _logger;
+
+    public OrderProcessingService(
+        Channel<int> channel,
+        IDbContextFactory<LibraryDbContext> factory,
+        ILogger<OrderProcessingService> logger)
+    {
+        _channel = channel;
+        _factory = factory;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(
+        CancellationToken stoppingToken)
+    {
+        await foreach (
+            var orderId
+            in _channel.Reader.ReadAllAsync(
+                stoppingToken))
+        {
+            await ProcessOrderAsync(
+                orderId,
+                stoppingToken);
+        }
+    }
+}
+```
+
+---
+
+# Procesar cada orden
+
+```csharp
+private async Task ProcessOrderAsync(
+    int orderId,
+    CancellationToken ct)
+{
+    using var db =
+        _factory.CreateDbContext();
+
+    _logger.LogInformation(
+        "Procesando orden {OrderId}",
+        orderId);
+
+    await Task.Delay(50, ct);
+
+    // Aquí se aplicaría la lógica
+    // de actualización de inventario.
+}
+```
+
+Cada orden obtiene su propio `DbContext`.
+
+---
+
+# Arquitectura completa
+
+```mermaid
+flowchart TD
+
+A[Cliente HTTP]
+
+A -->|POST /orders/burst| B[Minimal API]
+
+B --> C[Channel]
+
+C --> D[Worker 1]
+
+C --> E[Worker 2]
+
+C --> F[Worker 3]
+
+D --> G[(SQL Server)]
+
+E --> G
+
+F --> G
+```
+
+---
+
+# Beneficios del patrón
+
+Este diseño ofrece múltiples ventajas:
+
+- ✅ Respuesta HTTP inmediata.
+- ✅ Procesamiento desacoplado.
+- ✅ Escalabilidad horizontal.
+- ✅ Workers independientes.
+- ✅ Menor tiempo de espera para el usuario.
+- ✅ Uso seguro de `DbContext`.
+- ✅ Preparado para manejar miles de órdenes concurrentes.
+
+---
+
+# 💾 Paso 15: Concurrencia Optimista y Reintentos Automáticos
+
+Una vez que el sistema comienza a procesar múltiples órdenes en paralelo aparece un problema fundamental:
+
+> ¿Qué ocurre cuando dos o más procesos intentan actualizar simultáneamente el mismo registro del inventario?
+
+Este escenario recibe el nombre de **Condición de Carrera (Race Condition)** y puede provocar inconsistencias como vender más productos de los que realmente existen (**Overselling**).
+
+---
+
+# 🚨 El problema del Overselling
+
+Supongamos el siguiente inventario:
+
+```text
+Producto A
+
+Stock = 1
+```
+
+Dos clientes compran al mismo tiempo.
+
+```text
+Cliente A
+
+↓
+
+Leer Stock = 1
+
+-----------------------
+
+Cliente B
+
+↓
+
+Leer Stock = 1
+```
+
+Ambos creen que existe una unidad disponible.
+
+Posteriormente ambos descuentan el inventario.
+
+```text
+Cliente A
+
+1 → 0
+
+Guardar ✔
+
+----------------------
+
+Cliente B
+
+1 → 0
+
+Guardar ✔
+```
+
+Resultado:
+
+```text
+Se vendieron
+
+2 productos
+
+↓
+
+Existía
+
+1 producto
+```
+
+El sistema acaba de vender inventario inexistente.
+
+---
+
+# 💡 Solución: Concurrencia Optimista
+
+En lugar de bloquear registros, **Entity Framework Core** utiliza un mecanismo denominado:
+
+> **Optimistic Concurrency**
+
+La idea es sencilla.
+
+Cada fila posee un identificador que cambia cada vez que la fila es modificada.
+
+Ese identificador normalmente es:
+
+```text
+RowVersion
+```
+
+---
+
+# ¿Cómo funciona RowVersion?
+
+Supongamos el siguiente registro.
+
+```text
+Producto
+
+Stock = 10
+
+RowVersion = 15
+```
+
+Dos procesos lo leen simultáneamente.
+
+```text
+Proceso A
+
+Stock = 10
+
+RowVersion = 15
+
+---------------------
+
+Proceso B
+
+Stock = 10
+
+RowVersion = 15
+```
+
+---
+
+## Primer proceso
+
+Actualiza correctamente.
+
+```text
+Stock = 9
+
+RowVersion = 16
+```
+
+---
+
+## Segundo proceso
+
+Todavía conserva:
+
+```text
+RowVersion = 15
+```
+
+Cuando intenta ejecutar:
+
+```csharp
+db.SaveChanges();
+```
+
+EF Core genera internamente una consulta similar a:
+
+```sql
+UPDATE Inventory
+SET CurrentStock = 8
+WHERE Id = 1
+AND RowVersion = 15;
+```
+
+Pero en la base de datos ya existe:
+
+```text
+RowVersion = 16
+```
+
+No se actualiza ninguna fila.
+
+EF Core detecta esta situación y lanza:
+
+```text
+DbUpdateConcurrencyException
+```
+
+---
+
+# Flujo completo
+
+```mermaid
+flowchart TD
+
+A[Leer Registro]
+
+A --> B[Modificar Stock]
+
+B --> C[SaveChanges]
+
+C --> D{¿RowVersion coincide?}
+
+D -->|Sí| E[Guardar]
+
+D -->|No| F[DbUpdateConcurrencyException]
+```
+
+---
+
+# Implementar una política de reintentos
+
+En lugar de fallar inmediatamente, el servicio puede intentar nuevamente.
+
+El algoritmo sigue el patrón:
+
+```text
+Intentar
+
+↓
+
+¿Conflicto?
+
+↓
+
+Recargar datos
+
+↓
+
+Recalcular
+
+↓
+
+Guardar otra vez
+```
+
+---
+
+## Implementación
+
+```csharp
+async Task<bool> SaveWithRetryAsync(
+    LibraryDbContext db,
+    ILogger logger)
+{
+    for (int attempt = 1; attempt <= 3; attempt++)
+    {
+        try
+        {
+            await db.SaveChangesAsync();
+
+            return true;
+        }
+        catch (DbUpdateConcurrencyException ex)
+            when (attempt < 3)
+        {
+            var entry = ex.Entries.Single();
+
+            var databaseValues =
+                await entry.GetDatabaseValuesAsync();
+
+            entry.OriginalValues.SetValues(databaseValues!);
+
+            var currentStock =
+                databaseValues!
+                    .GetValue<int>("CurrentStock");
+
+            if (currentStock <= 0)
+            {
+                logger.LogWarning(
+                    "Inventario agotado.");
+
+                return false;
+            }
+
+            entry.CurrentValues["CurrentStock"] =
+                currentStock -
+                (int)entry.CurrentValues["Quantity"];
+        }
+    }
+
+    return false;
+}
+```
+
+---
+
+# ¿Qué ocurre internamente?
+
+## Primer intento
+
+```text
+Guardar
+
+↓
+
+DbUpdateConcurrencyException
+```
+
+---
+
+## Recargar información
+
+```csharp
+var databaseValues =
+    await entry.GetDatabaseValuesAsync();
+```
+
+Ahora conocemos el estado real del inventario.
+
+---
+
+## Actualizar el Change Tracker
+
+```csharp
+entry.OriginalValues.SetValues(databaseValues);
+```
+
+Esto sincroniza el nuevo `RowVersion`.
+
+---
+
+## Recalcular
+
+```text
+Stock Actual
+
+↓
+
+Aplicar nuevamente
+
+↓
+
+Nuevo Stock
+```
+
+---
+
+## Reintentar
+
+```csharp
+await db.SaveChangesAsync();
+```
+
+Si vuelve a existir un conflicto:
+
+```text
+Intento 2
+```
+
+Y nuevamente:
+
+```text
+Intento 3
+```
+
+---
+
+# ¿Qué ocurre después del tercer intento?
+
+Si incluso después de tres intentos continúa existiendo conflicto, el sistema asume que otro proceso consumió definitivamente el inventario.
+
+La orden cambia automáticamente a:
+
+```text
+Backordered
+```
+
+En lugar de vender inventario inexistente.
+
+---
+
+# Diagrama del algoritmo
+
+```mermaid
+flowchart TD
+
+A[SaveChanges]
+
+A --> B{¿Concurrencia?}
+
+B -->|No| C[Éxito]
+
+B -->|Sí| D[Leer datos actuales]
+
+D --> E[Actualizar RowVersion]
+
+E --> F[Recalcular inventario]
+
+F --> G{¿Intentos < 3?}
+
+G -->|Sí| A
+
+G -->|No| H[Backordered]
+```
+
+---
+
+# Beneficios
+
+- Nunca existe stock negativo.
+- No se bloquean registros.
+- Mayor rendimiento.
+- Compatible con múltiples servidores.
+- Ideal para aplicaciones web.
+
+---
+
+# 🚀 Paso 16: Benchmark y Medición de Rendimiento
+
+Una vez implementado el procesamiento concurrente, resulta útil medir si realmente existe una mejora.
+
+Para ello se crea el endpoint:
+
+```text
+POST /benchmark
+```
+
+Su objetivo consiste en comparar:
+
+- Procesamiento secuencial.
+- Procesamiento paralelo.
+
+---
+
+# ¿Por qué medir?
+
+Una optimización debe demostrarse con datos.
+
+El benchmark responde preguntas como:
+
+- ¿Es realmente más rápido?
+- ¿Cuánto mejora?
+- ¿Vale la pena la complejidad añadida?
+
+---
+
+# Stopwatch
+
+.NET incluye la clase:
+
+```csharp
+Stopwatch
+```
+
+Su uso es muy sencillo.
+
+```csharp
+var sw = Stopwatch.StartNew();
+
+// Código
+
+sw.Stop();
+
+Console.WriteLine(sw.Elapsed);
+```
+
+---
+
+# Endpoint `/benchmark`
+
+```csharp
+app.MapPost("/benchmark",
+async (
+    IDbContextFactory<LibraryDbContext> factory) =>
+{
+    const int N = 100;
+
+    await ResetInventoryToBaseline();
+
+    var sw = Stopwatch.StartNew();
+
+    for (int i = 0; i < N; i++)
+    {
+        using var db =
+            factory.CreateDbContext();
+
+        var item =
+            await db.Inventory.FindAsync(1);
+
+        item.CurrentStock--;
+
+        await db.SaveChangesAsync();
+    }
+
+    sw.Stop();
+
+    var sequential =
+        sw.Elapsed;
+
+    await ResetInventoryToBaseline();
+
+    sw.Restart();
+
+    var tasks =
+        Enumerable.Range(0, N)
+        .Select(async i =>
+        {
+            using var db =
+                factory.CreateDbContext();
+
+            var item =
+                await db.Inventory.FindAsync(1);
+
+            item.CurrentStock--;
+
+            await db.SaveChangesAsync();
+        });
+
+    await Task.WhenAll(tasks);
+
+    sw.Stop();
+
+    var parallel =
+        sw.Elapsed;
+
+    return Results.Ok(new
+    {
+        Sequential = sequential,
+        Parallel = parallel,
+        Speedup =
+            Math.Round(
+                sequential.TotalMilliseconds /
+                parallel.TotalMilliseconds,
+                2)
+    });
+});
+```
+
+---
+
+# Flujo del Benchmark
+
+```mermaid
+flowchart TD
+
+A[Reset Inventario]
+
+A --> B[Ejecutar Secuencial]
+
+B --> C[Guardar Tiempo]
+
+C --> D[Reset Inventario]
+
+D --> E[Ejecutar Paralelo]
+
+E --> F[Guardar Tiempo]
+
+F --> G[Calcular Speedup]
+```
+
+---
+
+# ¿Qué es el Speedup?
+
+Es la relación entre ambos tiempos.
+
+```text
+Speedup =
+
+Tiempo Secuencial
+
+---------------------
+
+Tiempo Paralelo
+```
+
+Ejemplo:
+
+|Modo|Tiempo|
+|----|------:|
+|Secuencial|12000 ms|
+|Paralelo|4000 ms|
+
+```text
+12000 / 4000 = 3
+```
+
+Resultado:
+
+```text
+3×
+
+Más rápido
+```
+
+---
+
+# ¿Por qué reiniciar el inventario?
+
+Antes de cada prueba se debe restaurar el stock.
+
+```text
+Secuencial
+
+↓
+
+Stock = 100
+
+↓
+
+Benchmark
+
+---------------------
+
+Paralelo
+
+↓
+
+Stock = 100
+
+↓
+
+Benchmark
+```
+
+De esta manera ambas mediciones parten de las mismas condiciones.
+
+---
+
+# 📋 Paso 17: Probes P2–P7
+
+Los **Probes** son pruebas de aceptación utilizadas para validar que el sistema cumple los objetivos de la Kata.
+
+---
+
+# P2 — Burst sin bloqueos
+
+Enviar una gran cantidad de órdenes.
+
+```bash
+curl -X POST \
+"http://localhost:5000/orders/burst?n=50"
+```
+
+Resultado esperado:
+
+```text
+HTTP 202 Accepted
+```
+
+Mientras las órdenes se procesan en segundo plano:
+
+```bash
+curl http://localhost:5000/inventory
+```
+
+El endpoint debe responder inmediatamente.
+
+---
+
+# P3 — Sin Overselling
+
+Después del Burst:
+
+```bash
+curl http://localhost:5000/inventory/verify
+```
+
+Debe comprobarse:
+
+```text
+NegativeStock = false
+
+TotalUsed == TotalFulfilled
+
+AllTerminal = true
+```
+
+---
+
+## Endpoint de verificación
+
+```csharp
+app.MapGet("/inventory/verify",
+async (LibraryDbContext db) =>
+{
+    var negative =
+        await db.Inventory.AnyAsync(
+            i => i.CurrentStock < 0);
+
+    var totalUsed =
+        await db.Inventory.SumAsync(
+            i => i.InitialStock -
+                 i.CurrentStock);
+
+    var fulfilled =
+        await db.Orders
+            .Where(o =>
+                o.Status ==
+                Status.Fulfilled)
+            .SelectMany(o => o.Lines)
+            .SumAsync(l => l.Quantity);
+
+    return new
+    {
+        NegativeStock = negative,
+
+        TotalUsed = totalUsed,
+
+        TotalFulfilled = fulfilled,
+
+        AllTerminal =
+            await db.Orders.AllAsync(
+                o => o.Status !=
+                Status.Pending)
+    };
+});
+```
+
+---
+
+# P4 — Prioridades
+
+Cuando existen órdenes:
+
+- Normal
+- Expedited
+
+Las órdenes urgentes deben finalizar primero.
+
+Puede comprobarse mediante:
+
+```bash
+curl -X POST \
+"http://localhost:5000/orders/burst?n=10"
+```
+
+Y posteriormente revisar:
+
+- Logs.
+- Reportes.
+- Tabla de órdenes.
+
+---
+
+# P5 — Benchmark
+
+Ejecutar:
+
+```bash
+curl -X POST \
+http://localhost:5000/benchmark
+```
+
+Salida esperada:
+
+```json
+{
+  "Sequential": "00:00:12",
+  "Parallel": "00:00:04",
+  "Speedup": 3.0
+}
+```
+
+---
+
+# P6 — Preparación para apagado ordenado
+
+Aunque la implementación completa se verá en la siguiente sección, la prueba consiste en:
+
+1. Ejecutar un Burst grande.
+2. Presionar **Ctrl + C**.
+3. Reiniciar la aplicación.
+4. Verificar que la base de datos permanece consistente.
+
+---
+
+# Resumen de los Probes
+
+|Probe|Objetivo|
+|------|---------|
+|P2|Procesamiento concurrente sin bloquear HTTP|
+|P3|No existe Overselling|
+|P4|Respeto de prioridades|
+|P5|Comparación de rendimiento|
+|P6|Preparación para apagado ordenado|
+
+---
+
+# 📌 Conceptos aprendidos
+
+En esta sección incorporaste:
+
+- ✅ Concurrencia Optimista.
+- ✅ `RowVersion`.
+- ✅ `DbUpdateConcurrencyException`.
+- ✅ Reintentos automáticos.
+- ✅ Protección contra Overselling.
+- ✅ Benchmarking.
+- ✅ `Stopwatch`.
+- ✅ Medición de Speedup.
+- ✅ Pruebas de aceptación (Probes P2–P6).
+
+# 🌐 Paso 18: Graceful Shutdown y `CancellationToken`
+
+Hasta este punto el sistema es capaz de procesar múltiples órdenes concurrentemente. Sin embargo, aún existe una situación crítica que debemos considerar:
+
+> ¿Qué ocurre si la aplicación se cierra mientras todavía existen órdenes procesándose?
+
+Si el servidor se detiene abruptamente podrían ocurrir problemas como:
+
+- Órdenes incompletas.
+- Transacciones parcialmente ejecutadas.
+- Logs sin escribir.
+- Trabajos perdidos.
+- Estados inconsistentes.
+
+Para evitarlo, **ASP.NET Core** implementa el concepto de **Graceful Shutdown**.
+
+---
+
+# 💡 ¿Qué es un Graceful Shutdown?
+
+Es el proceso mediante el cual una aplicación recibe una señal de apagado y dispone de unos segundos para finalizar correctamente las tareas pendientes antes de cerrarse.
+
+Ejemplo:
+
+```text
+Usuario presiona Ctrl + C
+
+        │
+
+        ▼
+
+Host recibe señal
+
+        │
+
+        ▼
+
+Cancelar nuevos trabajos
+
+        │
+
+        ▼
+
+Finalizar trabajo actual
+
+        │
+
+        ▼
+
+Guardar Logs
+
+        │
+
+        ▼
+
+Cerrar aplicación
+```
+
+---
+
+# ¿Qué ocurre cuando presionamos Ctrl + C?
+
+El Host de ASP.NET Core ejecuta internamente:
+
+```text
+ApplicationStopping
+
+↓
+
+StopAsync()
+
+↓
+
+Dispose()
+```
+
+Los `BackgroundService` reciben automáticamente un:
+
+```csharp
+CancellationToken
+```
+
+que indica que la aplicación está terminando.
+
+---
+
+# El papel del `CancellationToken`
+
+El token permite que nuestros procesos detecten cuándo deben detenerse.
+
+Ejemplo:
+
+```csharp
+while (!stoppingToken.IsCancellationRequested)
+{
+    ...
+}
+```
+
+Cuando el usuario presiona **Ctrl + C**:
+
+```text
+IsCancellationRequested
+
+false
+
+↓
+
+true
+```
+
+El servicio abandona el ciclo de procesamiento de forma ordenada.
+
+---
+
+# Worker preparado para cancelación
+
+```csharp
+protected override async Task ExecuteAsync(
+    CancellationToken stoppingToken)
+{
+    while (!stoppingToken.IsCancellationRequested)
+    {
+        if (await _orderChannel.Reader
+            .WaitToReadAsync(stoppingToken))
+        {
+            var orderId =
+                await _orderChannel.Reader
+                    .ReadAsync(stoppingToken);
+
+            await ProcessOrderAsync(
+                orderId,
+                stoppingToken);
+        }
+    }
+
+    _logger.LogInformation(
+        "Worker detenido correctamente.");
+}
+```
+
+---
+
+# Flujo del Worker
+
+```mermaid
+flowchart TD
+
+A[Esperar órdenes]
+
+A --> B[Leer del Channel]
+
+B --> C[Procesar Orden]
+
+C --> A
+
+A --> D{CancellationToken}
+
+D -->|Cancelado| E[Salir del Worker]
+```
+
+---
+
+# ¿Por qué pasar el `CancellationToken`?
+
+Siempre que un método sea asíncrono es recomendable propagar el token.
+
+```csharp
+await db.SaveChangesAsync(ct);
+
+await Task.Delay(50, ct);
+
+await factory.CreateDbContextAsync(ct);
+```
+
+De esta forma cualquier operación pendiente puede cancelarse correctamente.
+
+---
+
+# Manejo global del ciclo de vida
+
+Una buena práctica consiste en envolver toda la aplicación dentro de un bloque `try / catch / finally`.
+
+```csharp
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .WriteTo.File(
+        "logs/fulfillment-log-.txt",
+        rollingInterval: RollingInterval.Day)
+    .CreateLogger();
+
+try
+{
+    Log.Information("Iniciando aplicación");
+
+    var builder =
+        WebApplication.CreateBuilder(args);
+
+    builder.Host.UseSerilog();
+
+    var app = builder.Build();
+
+    app.MapGet("/", () => "Hello World!");
+
+    app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(
+        ex,
+        "La aplicación terminó inesperadamente");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
+```
+
+---
+
+# ¿Por qué `Log.CloseAndFlush()`?
+
+Serilog escribe información utilizando buffers.
+
+Si la aplicación termina inmediatamente:
+
+```text
+Evento
+
+↓
+
+Buffer
+
+↓
+
+X Aplicación cerrada
+```
+
+Al ejecutar:
+
+```csharp
+Log.CloseAndFlush();
+```
+
+todos los eventos pendientes son escritos físicamente.
+
+```text
+Evento
+
+↓
+
+Buffer
+
+↓
+
+Archivo
+
+↓
+
+Cerrar aplicación
+```
+
+---
+
+# Flujo completo del apagado
+
+```mermaid
+sequenceDiagram
+
+participant Console
+
+participant Host
+
+participant Worker
+
+participant Logger
+
+Console->>Host: Ctrl + C
+
+Host->>Worker: CancellationToken
+
+Worker->>Worker: Finalizar trabajo actual
+
+Worker->>Logger: Log "Stopping"
+
+Host->>Logger: CloseAndFlush()
+
+Logger-->>Host: Buffers vaciados
+
+Host-->>Console: Aplicación detenida
+```
+
+---
+
+# 🔒 Paso 19: Observabilidad con Serilog
+
+Una aplicación empresarial no solamente debe funcionar correctamente.
+
+También debe permitir responder preguntas como:
+
+- ¿Qué ocurrió?
+- ¿Cuándo ocurrió?
+- ¿Quién ejecutó la acción?
+- ¿Cuánto tiempo tardó?
+- ¿Hubo errores?
+
+A esta capacidad se le denomina:
+
+> **Observabilidad**
+
+---
+
+# Configuración recomendada
+
+```csharp
+builder.Configuration
+    .AddJsonFile("appsettings.json");
+
+Log.Logger =
+    new LoggerConfiguration()
+        .MinimumLevel.Debug()
+        .MinimumLevel.Override(
+            "Microsoft",
+            LogEventLevel.Warning)
+        .WriteTo.Console()
+        .WriteTo.File(
+            "logs/fulfillment-log-.txt",
+            rollingInterval:
+                RollingInterval.Day)
+        .CreateLogger();
+```
+
+---
+
+# Niveles de Log
+
+Serilog clasifica los eventos en distintos niveles.
+
+|Nivel|Uso recomendado|
+|------|---------------|
+|Verbose|Información extremadamente detallada.|
+|Debug|Diagnóstico durante el desarrollo.|
+|Information|Flujo normal de la aplicación.|
+|Warning|Situaciones inesperadas pero recuperables.|
+|Error|Errores que afectan una operación concreta.|
+|Fatal|Errores que provocan el cierre de la aplicación.|
+
+---
+
+# Ejemplos
+
+## Debug
+
+```csharp
+Log.Debug(
+    "Resultado interno: {@result}",
+    result);
+```
+
+---
+
+## Information
+
+```csharp
+Log.Information(
+    "Procesando orden {OrderId}",
+    id);
+```
+
+---
+
+## Warning
+
+```csharp
+Log.Warning(
+    "Stock insuficiente para la orden {OrderId}",
+    id);
+```
+
+---
+
+## Error
+
+```csharp
+Log.Error(
+    ex,
+    "Error al guardar la orden");
+```
+
+---
+
+## Fatal
+
+```csharp
+Log.Fatal(
+    ex,
+    "La aplicación terminó inesperadamente");
+```
+
+---
+
+# Logging estructurado
+
+Una gran ventaja de Serilog consiste en registrar propiedades en lugar de construir cadenas de texto.
+
+Incorrecto:
+
+```csharp
+Log.Information(
+    "Procesando orden " + id);
+```
+
+Correcto:
+
+```csharp
+Log.Information(
+    "Procesando orden {OrderId}",
+    id);
+```
+
+El segundo formato permite que herramientas como:
+
+- Seq
+- Elasticsearch
+- Azure Monitor
+- Datadog
+- Splunk
+
+indexen automáticamente el campo `OrderId`.
+
+---
+
+# Middleware Global de Excepciones
+
+En aplicaciones reales no es recomendable manejar excepciones en cada endpoint.
+
+ASP.NET Core permite centralizar esta responsabilidad.
+
+```csharp
+builder.Services
+    .AddExceptionHandler<
+        CustomExceptionHandler>();
+```
+
+---
+
+# Configuración
+
+```csharp
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+
+    app.UseHsts();
+}
+```
+
+---
+
+# Implementación
+
+```csharp
+public class CustomExceptionHandler
+    : IExceptionHandler
+{
+    private readonly
+        ILogger<CustomExceptionHandler>
+        _logger;
+
+    public CustomExceptionHandler(
+        ILogger<CustomExceptionHandler> logger)
+    {
+        _logger = logger;
+    }
+
+    public ValueTask<bool> TryHandleAsync(
+        HttpContext context,
+        Exception ex,
+        CancellationToken token)
+    {
+        _logger.LogError(
+            ex,
+            "Excepción detectada: {Message}",
+            ex.Message);
+
+        return new ValueTask<bool>(true);
+    }
+}
+```
+
+---
+
+# Beneficios
+
+- Un único punto de manejo.
+- Código más limpio.
+- Logs consistentes.
+- Respuestas homogéneas.
+
+---
+
+# 🚀 Paso 20: Resumen y Ejecución
+
+## Instalar EF Core CLI
+
+```bash
+dotnet tool install --global dotnet-ef
+```
+
+---
+
+## Crear migraciones
+
+```bash
+dotnet ef migrations add Init \
+    -p Library.Data \
+    -s Library.Api
+```
+
+---
+
+## Actualizar la base de datos
+
+```bash
+dotnet ef database update \
+    -p Library.Data \
+    -s Library.Api
+```
+
+---
+
+## Ejecutar la aplicación
+
+Linux/macOS
+
+```bash
+export ASPNETCORE_URLS="http://localhost:5000"
+
+dotnet run --project Library.Api
+```
+
+Windows PowerShell
+
+```powershell
+$env:ASPNETCORE_URLS="http://localhost:5000"
+
+dotnet run --project Library.Api
+```
+
+---
+
+## Cadena de conexión
+
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection":
+      "Server=(localdb)\\MSSQLLocalDB;Database=LibraryDb;Trusted_Connection=True;"
+  }
+}
+```
+
+---
+
+## Swagger
+
+Si Swagger está habilitado:
+
+```text
+http://localhost:5000/swagger
+```
+
+---
+
+# Flujo completo del sistema
+
+```mermaid
+flowchart LR
+
+A[Cliente]
+
+A --> B[Minimal API]
+
+B --> C[Channel]
+
+C --> D[Background Worker]
+
+D --> E[DbContextFactory]
+
+E --> F[(SQL Server)]
+
+F --> G[Serilog]
+
+G --> H[Archivo de Logs]
+```
+
+---
+
+# Checklist del Día 4
+
+Al finalizar esta etapa tu aplicación será capaz de:
+
+- ✅ Procesar cientos de órdenes concurrentemente.
+- ✅ Utilizar `Channel<T>` como cola de trabajos.
+- ✅ Ejecutar múltiples `BackgroundService`.
+- ✅ Crear un `DbContext` por operación.
+- ✅ Detectar conflictos mediante `RowVersion`.
+- ✅ Reintentar automáticamente operaciones concurrentes.
+- ✅ Evitar Overselling.
+- ✅ Medir rendimiento con `Stopwatch`.
+- ✅ Comparar procesamiento secuencial vs paralelo.
+- ✅ Validar Probes P2–P6.
+- ✅ Finalizar correctamente mediante Graceful Shutdown.
+- ✅ Cancelar tareas usando `CancellationToken`.
+- ✅ Registrar eventos estructurados con Serilog.
+- ✅ Centralizar el manejo de excepciones.
+- ✅ Mantener observabilidad completa de la aplicación.
+
+---
+
+# 📌 Conceptos aprendidos
+
+Durante el Día 4 se incorporaron varios de los conceptos más importantes para el desarrollo de aplicaciones backend modernas:
+
+## Concurrencia
+
+- `Channel<T>`
+- `PriorityQueue<T>`
+- `ConcurrentQueue<T>`
+- `BackgroundService`
+- `Producer / Consumer`
+
+## Persistencia
+
+- `IDbContextFactory`
+- `RowVersion`
+- Concurrencia Optimista
+- Reintentos automáticos
+
+## Rendimiento
+
+- `Stopwatch`
+- Benchmarking
+- Speedup
+- Procesamiento paralelo
+
+## Infraestructura
+
+- `CancellationToken`
+- Graceful Shutdown
+- Hosted Services
+- Serilog
+- Logging estructurado
+- Observabilidad
+- Middleware global de excepciones
+
+---
+
+# 🎯 Resultado Final del Día 4
+
+Con esta implementación, la aplicación evoluciona desde una **Minimal API** que procesa solicitudes de forma síncrona a una arquitectura preparada para escenarios empresariales:
+
+- Alta concurrencia.
+- Procesamiento desacoplado.
+- Resiliencia frente a conflictos.
+- Medición objetiva del rendimiento.
+- Observabilidad completa.
+- Apagado seguro.
+- Código desacoplado y mantenible.
+
+Estos patrones constituyen la base para sistemas distribuidos y aplicaciones backend escalables construidas con **ASP.NET Core**, **Entity Framework Core** y **Serilog**.
