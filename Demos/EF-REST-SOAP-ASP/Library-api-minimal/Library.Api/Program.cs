@@ -1,0 +1,241 @@
+using Microsoft.EntityFrameworkCore;
+using Library.Data;
+using Library.Data.Entities;
+using Serilog;
+using Library.Api.Fulfillment;
+
+//My API program.cs
+//No main. We can think of it as 2 sections
+//Registering things with the builder
+//And the configuring things on the app
+//And at the very bottom that app object that represents our entire API alls ots run method
+
+//Builder area
+var builder = WebApplication.CreateBuilder(args);
+
+// The first thing that we need is to give our builder a connection string to a database
+var conn_string = "Server=localhost,1433;Database=LibraryMinimalDb;User Id=sa;Password=LibraryPass1!;TrustServerCertificate=true";
+
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console() // Write to console, and write to a file - starting a new file each day.
+    .WriteTo.File("logs/fulfillment-log-.log", rollingInterval: RollingInterval.Day)
+    .CreateLogger();
+
+builder.Host.UseSerilog(); // Tell the builder to use Serilog for logging
+
+//Tell the builder to use our LibraryDbContext with the connection string above
+//By registering our DbContext class
+//we hand off the managing of creating and destroying theses DbContext object to ASP.NET's
+//dependency injection container. Like spring beans if you're familiar.
+
+
+//ASP .NET has few different scope types
+// Transient - a new instance is created every time it's requested
+// Scoped - a new instance per HTTP request
+// Singleton - A single instance for th entire runtime
+builder.Services.AddDbContext<LibraryDbContext>(options => options.UseSqlServer(conn_string), ServiceLifetime.Scoped, ServiceLifetime.Singleton); //Scoped is the default, but we can be explicit - and allow for SingletonScope when needed 
+
+//We know we will need more than one LibraryDbContext in one or more of these methods. But we don't knw how many before runtime, So we can use a DbContextFactory to create as many we need at runtime.
+builder.Services.AddDbContextFactory<LibraryDbContext>(options => options.UseSqlServer(conn_string));
+
+// Registered our custom service with the builder
+builder.Services.AddScoped<IFulfillmentService, FulfillmentService>();
+
+//Swagger stuff added o builder
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+
+// App area
+var app = builder.Build();
+
+//Swagger stuff aded to app
+app.UseSwagger();
+app.UseSwaggerUI();
+
+//Endpoint area
+app.MapGet("/", () => "Hello World!");
+
+//Get all items from the inventory
+app.MapGet("/inventory", async (LibraryDbContext db) =>
+{
+    return await db.Inventory.ToListAsync();
+});
+
+//Lets use LINQ - Language Integrated Query
+// LINQ is a library that just lets us query collections
+// The logic actually flows from SQL  DQL - You can use method OR sql query syntax
+// You can even save the queries themselves as C# objects if you want to
+app.MapGet("/inventory/by-value", (LibraryDbContext db) =>
+{
+    return db.Inventory.Include(i => i.Product)
+        .GroupBy(i => i.CurrentStock >= 5 ? "well-stocked" : "low")
+        .Select(g => new { tier = g.Key, count = g.Count(), units = g.Sum(i => i.CurrentStock) })
+        .ToList();
+});
+
+// Any endpoint that start with "/peek" are diagnostic/demo
+//We are going to use them to expose things like EF Core change tracking and other underlying behaviors for learning. A real app would have no reason to expose HTTP endpoints to outside users to make this stuff observable
+
+app.MapGet("/peek/tracking", (LibraryDbContext db) =>
+{
+    // Lets see the underlying EF Core change tracker
+    var unchanged = db.Products.First(); // grab the first object. Read but not modified => Unchanged
+    var modified = db.Products.Skip(1).First(); // queried... still Unchanged as of here.
+
+    modified.Price += 1; // state => Modified
+
+    // When we create a new object and call the dbset's .Add() method it's state is
+    // "Added" - this has not actually hit the database yet. But it's tracked to be added.
+    db.Products.Add(new Product { Sku = "BK-TMP", Name = "Tmp", Price = 1m });
+
+    // This bit of code is the non-production demo bit
+    // We are accessing the LibraryDbContext object's change tracker to pull info. 
+    // At most you'd debug with this. 
+    var states = db.ChangeTracker.Entries()
+        .Select(e => new { entity = e.Entity.GetType().Name, state = e.State.ToString() })
+        .ToList();
+
+    db.SaveChanges();
+
+    // Clearing the change tracker manually
+    db.ChangeTracker.Clear();
+
+    return states;
+});
+
+// Lets manually go out of our way to create a conflict - obviously, don't do this in a real app
+app.MapGet("/peek/conflict", (IServiceScopeFactory scopes) =>
+{
+    // Manually asking for scopes. Normally each endpoint method call gets its own scope tracked
+    // by ASP.NET under the hood during runtime. We can, for various reasons good and bad do this manually.
+    using var scopeA = scopes.CreateScope();
+    using var scopeB = scopes.CreateScope();
+
+    // Now, remember that a dbContext is generated per scope, so we have to do that too
+    var firstDb = scopeA.ServiceProvider.GetRequiredService<LibraryDbContext>();
+    var secondDb = scopeB.ServiceProvider.GetRequiredService<LibraryDbContext>();
+
+    // Each dbContext reads from the same database BUT they track changes independently 
+    // remember we gave Inventory entities a RowVersion - not just a property named RowVersion
+    // but an actual OnModelCreation FluentAPI config for a RowVersion
+    // Both of these start with the same RowVersion value
+    var firstInventory = firstDb.Inventory.First(i => i.Id == 1); // RowVersion = 1
+    var secondInventory = secondDb.Inventory.First(i => i.Id == 1); //RowVersion = 1
+
+    // Lets modify one AND save its changes, while just modifying the other
+    firstInventory.CurrentStock--; // decrement => Modified
+    firstDb.SaveChanges(); // save changes is what persists any created, deleted or modified objects
+    // that row in the DB now has a RowVersion of 2 
+
+    // Calling SaveChanges() above modifies the RowVersion value
+
+    // This object, that should represent the exact same row in the DB now has a stale RowVersion
+    // before EF tries to persist any changes, it will check the RowVersion. It won't match
+    // and an exception will be thrown
+    secondInventory.CurrentStock--; // Rowversion still 1 - doesnt match DB
+
+    try
+    {
+        secondDb.SaveChanges(); // this should fail as RowVersions don't match
+    }
+    catch (DbUpdateConcurrencyException ex)
+    {
+        // In this case we want EF to retry the UPDATE 
+        // Asking for the actual ChangeTracker entry that threw the exception 
+        // this is EF Core specific.
+        var entry = ex.Entries.Single();
+
+        // For the entry that threw the exception - grab it's current values from the DB
+        // not the object, just the values 
+        var current = entry.GetDatabaseValues();
+
+        // Every entry in the change tracker tracks two sets of values. 
+        // OriginalValues = the values of the object when it was loaded from the db
+        // CurrentValues = the new modified values we changed on the object in our app
+        // Here we manually set the OriginalValues to the values from the DB we JUST grabbed
+        entry.OriginalValues.SetValues(current!);
+
+        // Using the entry to grab the actual item - going somewhat backwards
+        ((InventoryItem)entry.Entity).CurrentStock =
+            current!.GetValue<int>(nameof(InventoryItem.CurrentStock)) - 1;
+
+        secondDb.SaveChanges();
+    }
+
+    // I can send back specific codes via methods like .Ok() with messages inside 
+    // others include Problem(), NotFound(), etc
+    return Results.Ok("Conflict caught, reloaded and retried.");
+
+});
+
+// Endpoint to reset the stock of the items in my catalog - useful for testing and demo 
+// might need to hit this endpoint while we work
+app.MapPost("/inventory/rest", (LibraryDbContext db, ILogger<Program> logger) =>
+{
+    // We just ask for an ILogger like we do our dbcontext
+    // then use it as normal
+    logger.LogInformation("Started seeing database");
+
+    // What I want to do is reset the items that I know I stuck into the db.
+    foreach (InventoryItem inv in db.Inventory) // for each item in my db Inventory table... do something
+    {
+        // I only want to do something if the primary key is 1, 2, or 3.... 
+        switch (inv.Id)
+        {
+            case 1:
+                inv.CurrentStock = 5;
+                break;
+            case 2:
+                inv.CurrentStock = 3;
+                break;
+            case 3:
+                inv.CurrentStock = 8;
+                break;
+            default:
+                break;
+        }
+
+    }
+
+    db.SaveChanges(); // persisting to db
+    logger.LogInformation("Stock reset");
+    return Results.Ok("stock reset");
+
+});
+
+// Fulfillment stuff for orders goes down here
+// Im going to take in info from the front end (swagger for now)
+// I have a few options
+// I can take in from the uri/query string
+// I can also take in parameters from the body
+
+// Quick method to fulfill one order
+app.MapPost("/orders", async (OrderPaylod orderRequest, IDbContextFactory<LibraryDbContext> factory, CancellationToken ct, IFulfillmentService fSvc) =>
+{
+    // Remember we create an order in our db
+    // And then try to create a Successful fulfillment record against the db
+    await using var db = await factory.CreateDbContextAsync(ct); // ask for db context to place order
+
+    var newOrder = new Order
+    {
+        CustomerId = orderRequest.CustomerId,
+        Priority = Priority.Normal,
+        // Using the orderRequest from the HTTP request body to create my order
+        Lines = { new OrderLine { ProductId = orderRequest.ProductId, Quantity = orderRequest.Quantity } }
+    };
+
+    db.Orders.Add(newOrder); // add new order 
+    await db.SaveChangesAsync(ct); // save that order to db
+
+    // Now that we've added the order - we try to fulfill it
+    FulfillmentResult result = await fSvc.FulfillOneAsync(newOrder.Id, ct); // newOrder is now in the db, we can ask for its pk
+    return Results.Ok(new { orderId = newOrder.Id, result = result.ToString() });
+});
+
+//My file always end with app.Run() - minimal API or Controller API
+app.Run();
+
+Log.CloseAndFlush();
+
+public record OrderPaylod(int ProductId, int Quantity, int CustomerId);

@@ -1,0 +1,3834 @@
+# 📚 Demo Recipes for My Project
+
+# 📅 Día 1 
+Esta sección contiene la receta de comandos, arquitectura y configuraciones iniciales del **Día 1 de la Kata**. Mapea la creación de una solución limpia en **.NET 10** utilizando una arquitectura separada (**API + Data/Domain**) con **Entity Framework Core**.
+
+---
+
+# 🛠️ Paso 1: Inicialización del Entorno y la Solución
+
+Ejecuta los siguientes comandos para crear la estructura base del proyecto.
+
+> 💡 **Objetivo:** Crear la solución, los proyectos y establecer las referencias entre ellos.
+
+```bash
+# 1. Crear un nuevo directorio e ingresar a él
+mkdir Library-api-minimal
+cd Library-api-minimal
+
+# 2. Crear una nueva solución (.sln)
+dotnet new sln -n library-fufillment
+
+# 3. Crear el proyecto de Biblioteca de Clases (Dominio / Datos)
+dotnet new classlib -n Library.Data -f net10.0
+
+# 4. Crear el proyecto ASP.NET Core Minimal API
+dotnet new web -n Library.Api -f net10.0
+
+# 5. Agregar ambos proyectos a la solución
+dotnet sln add Library.Data Library.Api
+
+# 6. Agregar la referencia del proyecto
+# La API depende de la capa de Datos
+dotnet add Library.Api reference Library.Data
+
+# 7. Instalar Entity Framework CLI (si aún no está instalado)
+dotnet tool install --global dotnet-ef
+
+# 8. Crear un .gitignore para proyectos .NET
+dotnet new gitignore
+```
+
+---
+
+# 📦 Paso 2: Instalación de paquetes NuGet
+
+Instala las dependencias necesarias para trabajar con:
+
+- SQL Server
+- Entity Framework Core
+- Migraciones
+- Swagger/OpenAPI
+
+## Library.Data
+
+```bash
+dotnet add Library.Data package Microsoft.EntityFrameworkCore.SqlServer
+dotnet add Library.Data package Microsoft.EntityFrameworkCore.Design
+```
+
+## Library.Api
+
+```bash
+dotnet add Library.Api package Microsoft.EntityFrameworkCore.SqlServer
+dotnet add Library.Api package Microsoft.EntityFrameworkCore.Design
+
+# Documentación automática de Endpoints
+dotnet add Library.Api package Swashbuckle.AspNetCore
+```
+
+---
+
+# 📐 Paso 3: Arquitectura y Modelado de Datos
+
+## 💡 Concepto clave: Separar el concepto del inventario
+
+Evita que una misma entidad represente tanto la definición del producto como su existencia física.
+
+|Entidad|Responsabilidad|
+|-------|---------------|
+|`Product`|Representa el concepto del producto (Título, Autor, ISBN, Precio, etc.)|
+|`InventoryItem`|Representa una unidad física existente dentro del inventario.|
+
+Esta separación hace que el modelo sea más flexible y escalable.
+
+---
+
+## Restricciones (Constraints)
+
+Para propiedades monetarias utiliza siempre una precisión explícita.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+
+public class Product
+{
+    public int Id { get; set; }
+
+    // Precisión: 10 dígitos totales y 2 decimales
+    [Precision(10, 2)]
+    public decimal Price { get; set; }
+}
+```
+
+---
+
+# 🗄️ Paso 4: Crear el DbContext
+
+El `DbContext` es el componente encargado de:
+
+- Traducir objetos C# a consultas SQL.
+- Administrar conexiones.
+- Realizar seguimiento de cambios.
+- Ejecutar operaciones CRUD.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+
+public class LibraryDbContext : DbContext
+{
+    public LibraryDbContext(DbContextOptions<LibraryDbContext> options)
+        : base(options)
+    {
+    }
+
+    public DbSet<Product> Products { get; set; }
+
+    public DbSet<InventoryItem> Inventory { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        // Configuración Fluent API
+        // Relaciones
+        // Índices
+        // Restricciones
+        // Data Seeding
+    }
+}
+```
+
+---
+
+# 🚀 Paso 5: Configuración de `Program.cs`
+
+En Minimal API el archivo `Program.cs` se divide conceptualmente en dos partes.
+
+## 1️⃣ Builder
+
+Aquí se registran todos los servicios.
+
+```csharp
+using Library.Data;
+using Microsoft.EntityFrameworkCore;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Swagger
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+// Registro del DbContext
+// builder.Services.AddDbContext<LibraryDbContext>(options =>
+//      options.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
+```
+
+---
+
+## 2️⃣ Pipeline
+
+Aquí se configuran los middlewares y posteriormente los endpoints.
+
+```csharp
+var app = builder.Build();
+
+app.UseSwagger();
+app.UseSwaggerUI();
+```
+
+---
+
+## Endpoint básico
+
+```csharp
+app.MapGet("/", () => "Hello World!");
+```
+
+---
+
+## Obtener todo el inventario
+
+```csharp
+app.MapGet("/inventory", async (LibraryDbContext db) =>
+{
+    return await db.Inventory.ToListAsync();
+});
+```
+
+---
+
+## Consulta usando LINQ
+
+```csharp
+app.MapGet("/inventory/by-value", (LibraryDbContext db) =>
+{
+    return db.Inventory
+        .Include(i => i.Product)
+        .GroupBy(i => i.CurrentStock >= 5
+            ? "well-stocked"
+            : "low")
+        .Select(g => new
+        {
+            tier = g.Key,
+            count = g.Count(),
+            units = g.Sum(i => i.CurrentStock)
+        })
+        .ToList();
+});
+```
+
+### 💡 Concepto: LINQ
+
+**LINQ (Language Integrated Query)** permite consultar colecciones usando sintaxis de C#.
+
+Algunas ventajas:
+
+- Es fuertemente tipado.
+- Se traduce automáticamente a SQL cuando se utiliza con EF Core.
+- Permite construir consultas dinámicamente.
+- Facilita operaciones como:
+
+  - `Where`
+  - `Select`
+  - `GroupBy`
+  - `OrderBy`
+  - `Include`
+  - `Join`
+  - `Any`
+  - `Count`
+  - `Sum`
+
+La consulta realmente se ejecuta cuando se materializa mediante métodos como:
+
+```csharp
+ToList()
+ToListAsync()
+First()
+FirstAsync()
+Single()
+Count()
+Any()
+```
+
+Finalmente la aplicación se inicia con:
+
+```csharp
+app.Run();
+```
+
+---
+
+# 🔄 Paso 6: Pipeline de Migraciones
+
+> ⚠️ **Importante**
+>
+> Todos los comandos deben ejecutarse desde la carpeta donde se encuentra el archivo **.sln**.
+
+## Crear la primera migración
+
+```bash
+dotnet ef migrations add Init \
+    --project Library.Data \
+    --startup-project Library.Api
+```
+
+---
+
+## Aplicar la migración
+
+```bash
+dotnet ef database update \
+    --project Library.Data \
+    --startup-project Library.Api
+```
+
+---
+
+## Crear nuevas migraciones
+
+Cada vez que modifiques el modelo de datos:
+
+- nuevas entidades
+- relaciones
+- índices
+- restricciones
+- Data Seeding
+
+crea una nueva migración.
+
+```bash
+dotnet ef migrations add DataSeeded \
+    --project Library.Data \
+    --startup-project Library.Api
+```
+
+---
+
+# 📌 Resumen del flujo de trabajo
+
+```text
+Crear solución
+        │
+        ▼
+Crear proyectos
+        │
+        ▼
+Agregar referencias
+        │
+        ▼
+Instalar paquetes
+        │
+        ▼
+Crear entidades
+        │
+        ▼
+Crear DbContext
+        │
+        ▼
+Registrar servicios
+        │
+        ▼
+Crear Endpoints
+        │
+        ▼
+Crear migración
+        │
+        ▼
+Actualizar Base de Datos
+        │
+        ▼
+Ejecutar la API
+```
+
+---
+
+# ✅ Resultado
+
+Al finalizar este proceso tendrás una solución organizada con:
+
+- 📁 **Library.Api**
+  - Minimal API
+  - Swagger
+  - Endpoints
+
+- 📁 **Library.Data**
+  - Entidades
+  - DbContext
+  - Migraciones
+  - Acceso a datos mediante EF Core
+
+Todo listo para comenzar a implementar la lógica de negocio.
+
+# 📅 Día 2: Modelado Avanzado, Concurrencia y Diagnóstico
+
+En esta etapa se amplía el dominio de la aplicación incorporando:
+
+- Nuevas entidades para el procesamiento de órdenes.
+- Uso de **Enums** para representar estados y prioridades.
+- Configuración avanzada mediante **Fluent API**.
+- Restricciones e índices únicos.
+- Manejo de **Concurrencia Optimista** con **RowVersion**.
+- Endpoints de diagnóstico para comprender el funcionamiento interno de **Entity Framework Core**.
+
+---
+
+# 📐 Paso 7: Nuevas Entidades del Dominio (`Library.Data`)
+
+Agrega las siguientes clases a la capa de datos para soportar el flujo de órdenes y clientes.
+
+## Estados de una Orden
+
+```csharp
+namespace Library.Data;
+
+public enum Status
+{
+    // Una orden recién creada inicia pendiente
+    Pending,
+
+    // La orden fue procesada correctamente
+    Fulfilled,
+
+    // No pudo completarse por falta de inventario
+    Backordered
+}
+```
+
+---
+
+## Prioridad de Procesamiento
+
+```csharp
+namespace Library.Data;
+
+public enum Priority
+{
+    // Valor por defecto
+    Normal = 0,
+
+    // Procesamiento urgente
+    Expedited = 1
+}
+```
+
+> 💡 **Nota**
+>
+> Los `enum` se almacenan por defecto como valores enteros (`0`, `1`, `2`, ...).
+>
+> Asignar explícitamente sus valores resulta útil cuando:
+>
+> - Se requiere mantener compatibilidad.
+> - Se realizan comparaciones numéricas.
+> - Se desea controlar el orden de prioridad.
+
+---
+
+## Entidad `Customer`
+
+```csharp
+namespace Library.Data;
+
+public class Customer
+{
+    public int Id { get; set; }
+
+    public string Name { get; set; } = default!;
+
+    public string Email { get; set; } = default!;
+
+    // Un cliente puede tener muchas órdenes
+    public List<Order> Orders { get; set; } = new();
+}
+```
+
+---
+
+## Entidad `Order`
+
+```csharp
+namespace Library.Data;
+
+public class Order
+{
+    public int Id { get; set; }
+
+    // Foreign Key explícita
+    public int CustomerId { get; set; }
+
+    public Customer Customer { get; set; } = default!;
+
+    public Priority Priority { get; set; }
+
+    public Status Status { get; set; }
+
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+
+    public DateTime? CompletedUtc { get; set; }
+
+    // Una orden contiene múltiples líneas
+    public List<OrderLine> Lines { get; set; } = new();
+}
+```
+
+### 💡 Buena práctica
+
+Expón siempre la **Foreign Key** además de la propiedad de navegación.
+
+```csharp
+public int CustomerId { get; set; }
+
+public Customer Customer { get; set; } = default!;
+```
+
+Esto permite:
+
+- Consultas más eficientes.
+- Evitar cargar entidades completas.
+- Actualizaciones sencillas utilizando únicamente el identificador.
+
+---
+
+## Entidad `OrderLine`
+
+```csharp
+namespace Library.Data;
+
+public class OrderLine
+{
+    public int Id { get; set; }
+
+    public int OrderId { get; set; }
+
+    public int ProductId { get; set; }
+
+    public int Quantity { get; set; }
+}
+```
+
+---
+
+## Entidad `FulfillmentEvent`
+
+```csharp
+namespace Library.Data;
+
+public class FulfillmentEvent
+{
+    public int Id { get; set; }
+
+    public int OrderId { get; set; }
+
+    public string Type { get; set; } = default!;
+
+    public DateTime FulfilledAtUtc { get; set; } = DateTime.UtcNow;
+}
+```
+
+### 💡 ¿Por qué utilizar `= default!`?
+
+```csharp
+public string Type { get; set; } = default!;
+```
+
+Esta expresión:
+
+- Elimina advertencias del compilador sobre referencias nulas.
+- Indica que EF Core inicializará la propiedad.
+- Provoca que la columna se genere como **NOT NULL** en la base de datos.
+
+---
+
+# 🗄️ Paso 8: Actualizar `LibraryDbContext`
+
+Registra los nuevos `DbSet` y configura restricciones utilizando **Fluent API**.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+
+namespace Library.Data;
+
+public class LibraryDbContext : DbContext
+{
+    public LibraryDbContext(DbContextOptions<LibraryDbContext> options)
+        : base(options)
+    {
+    }
+
+    public DbSet<Product> Products { get; set; }
+
+    public DbSet<InventoryItem> Inventory { get; set; }
+
+    public DbSet<Order> Orders => Set<Order>();
+
+    public DbSet<OrderLine> OrderLines => Set<OrderLine>();
+
+    public DbSet<Customer> Customers => Set<Customer>();
+
+    public DbSet<FulfillmentEvent> FulfillmentEvents => Set<FulfillmentEvent>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        // Configuración de concurrencia
+        modelBuilder.Entity<InventoryItem>()
+            .Property(i => i.RowVersion)
+            .IsRowVersion();
+
+        // Restricción de longitud
+        modelBuilder.Entity<Customer>()
+            .Property(c => c.Email)
+            .HasMaxLength(256);
+
+        // Índice único
+        modelBuilder.Entity<Customer>()
+            .HasIndex(c => c.Email)
+            .IsUnique();
+    }
+}
+```
+
+---
+
+## Agregar `RowVersion` a `InventoryItem`
+
+```csharp
+public class InventoryItem
+{
+    public int Id { get; set; }
+
+    public int CurrentStock { get; set; }
+
+    public int ProductId { get; set; }
+
+    public Product Product { get; set; } = default!;
+
+    // Control de concurrencia optimista
+    public byte[] RowVersion { get; set; } = default!;
+}
+```
+
+---
+
+# 💡 ¿Qué es `RowVersion`?
+
+`RowVersion` es una columna especial administrada automáticamente por SQL Server.
+
+Cada vez que una fila cambia:
+
+```text
+Actualización 1 -> RowVersion = 1
+
+Actualización 2 -> RowVersion = 2
+
+Actualización 3 -> RowVersion = 3
+```
+
+EF Core utiliza este valor para detectar si otro proceso modificó la misma fila antes de guardar los cambios.
+
+Si el valor cambió, se lanza una:
+
+```text
+DbUpdateConcurrencyException
+```
+
+---
+
+# 🔒 Restricciones configuradas
+
+## Longitud máxima
+
+```csharp
+.Property(c => c.Email)
+.HasMaxLength(256);
+```
+
+Genera una columna similar a:
+
+```sql
+nvarchar(256)
+```
+
+---
+
+## Índice único
+
+```csharp
+.HasIndex(c => c.Email)
+.IsUnique();
+```
+
+Impide almacenar dos clientes con el mismo correo.
+
+```text
+✔ juan@email.com
+
+✔ maria@email.com
+
+✖ juan@email.com
+```
+
+---
+
+# 🔬 Paso 9: Endpoints de Diagnóstico (`/peek`)
+
+> ⚠️ **Importante**
+>
+> Los endpoints bajo `/peek` tienen únicamente fines educativos para comprender el comportamiento interno de Entity Framework Core.
+>
+> **No deben exponerse en producción.**
+
+---
+
+## Endpoint 1: Change Tracker
+
+```csharp
+app.MapGet("/peek/tracking", (LibraryDbContext db) =>
+{
+    var unchanged = db.Products.First();
+
+    var modified = db.Products.Skip(1).First();
+
+    modified.Price += 1;
+
+    db.Products.Add(new Product
+    {
+        Sku = "BK-TMP",
+        Name = "Tmp",
+        Price = 1m
+    });
+
+    var states = db.ChangeTracker
+        .Entries()
+        .Select(e => new
+        {
+            entity = e.Entity.GetType().Name,
+            state = e.State.ToString()
+        })
+        .ToList();
+
+    db.SaveChanges();
+
+    db.ChangeTracker.Clear();
+
+    return states;
+});
+```
+
+---
+
+## ¿Qué demuestra este endpoint?
+
+El **Change Tracker** mantiene el estado de todas las entidades cargadas en memoria.
+
+Estados posibles:
+
+|Estado|Descripción|
+|------|-----------|
+|`Detached`|No pertenece al contexto|
+|`Unchanged`|Leída sin modificaciones|
+|`Modified`|Se modificó alguna propiedad|
+|`Added`|Se insertará|
+|`Deleted`|Se eliminará|
+
+Ejemplo:
+
+```text
+Product          -> Unchanged
+
+Product          -> Modified
+
+Product          -> Added
+```
+
+Después de ejecutar:
+
+```csharp
+db.SaveChanges();
+```
+
+EF Core:
+
+1. Genera las consultas SQL.
+2. Actualiza la base de datos.
+3. Sincroniza los estados.
+
+Finalmente:
+
+```csharp
+db.ChangeTracker.Clear();
+```
+
+libera toda la memoria asociada al seguimiento de entidades.
+
+---
+
+# Endpoint 2: Simulación de Concurrencia
+
+```csharp
+app.MapGet("/peek/conflict", (IServiceScopeFactory scopes) =>
+{
+    using var scopeA = scopes.CreateScope();
+    using var scopeB = scopes.CreateScope();
+
+    var firstDb = scopeA.ServiceProvider.GetRequiredService<LibraryDbContext>();
+    var secondDb = scopeB.ServiceProvider.GetRequiredService<LibraryDbContext>();
+
+    var firstInventory = firstDb.Inventory.First(i => i.Id == 1);
+
+    var secondInventory = secondDb.Inventory.First(i => i.Id == 1);
+
+    firstInventory.CurrentStock--;
+
+    firstDb.SaveChanges();
+
+    secondInventory.CurrentStock--;
+
+    try
+    {
+        secondDb.SaveChanges();
+    }
+    catch (DbUpdateConcurrencyException ex)
+    {
+        var entry = ex.Entries.Single();
+
+        var current = entry.GetDatabaseValues();
+
+        entry.OriginalValues.SetValues(current!);
+
+        ((InventoryItem)entry.Entity).CurrentStock =
+            current!.GetValue<int>(nameof(InventoryItem.CurrentStock)) - 1;
+
+        secondDb.SaveChanges();
+    }
+
+    return Results.Ok("Conflict caught, reloaded and retried.");
+});
+```
+
+---
+
+# 💡 ¿Qué ocurre internamente?
+
+Se simulan dos peticiones HTTP independientes.
+
+```text
+        Base de Datos
+
+             │
+     ┌───────┴────────┐
+     │                │
+ Scope A          Scope B
+ DbContext        DbContext
+```
+
+Ambos contextos leen el mismo registro.
+
+```text
+Stock = 10
+
+RowVersion = 1
+```
+
+---
+
+## Primer contexto
+
+```text
+Stock = 9
+
+RowVersion = 2
+```
+
+La actualización se realiza correctamente.
+
+---
+
+## Segundo contexto
+
+Todavía conserva:
+
+```text
+Stock = 10
+
+RowVersion = 1
+```
+
+Cuando intenta guardar:
+
+```csharp
+secondDb.SaveChanges();
+```
+
+EF Core detecta que el `RowVersion` ya cambió y lanza:
+
+```text
+DbUpdateConcurrencyException
+```
+
+---
+
+# Estrategia de resolución
+
+El ejemplo implementa el patrón:
+
+```text
+Capturar
+
+↓
+
+Recargar
+
+↓
+
+Resolver
+
+↓
+
+Reintentar
+```
+
+Paso por paso:
+
+```csharp
+var current = entry.GetDatabaseValues();
+```
+
+Obtiene los datos más recientes desde SQL Server.
+
+---
+
+```csharp
+entry.OriginalValues.SetValues(current!);
+```
+
+Actualiza el `RowVersion` almacenado por EF Core.
+
+---
+
+```csharp
+((InventoryItem)entry.Entity).CurrentStock =
+    current!.GetValue<int>(
+        nameof(InventoryItem.CurrentStock)
+    ) - 1;
+```
+
+Recalcula el nuevo stock usando el valor actualizado de la base de datos.
+
+---
+
+Finalmente:
+
+```csharp
+secondDb.SaveChanges();
+```
+
+La operación se ejecuta correctamente utilizando el nuevo `RowVersion`.
+
+---
+
+# 📌 Conceptos aprendidos
+
+Al finalizar este día habrás aprendido:
+
+- ✅ Modelado avanzado de entidades.
+- ✅ Relaciones uno a muchos.
+- ✅ Uso correcto de Enums.
+- ✅ Foreign Keys explícitas.
+- ✅ Fluent API.
+- ✅ Restricciones e índices únicos.
+- ✅ Change Tracker.
+- ✅ Estados de las entidades.
+- ✅ Concurrencia Optimista.
+- ✅ `RowVersion`.
+- ✅ Resolución de conflictos concurrentes.
+- ✅ Uso de múltiples `DbContext` mediante `IServiceScopeFactory`.
+
+Estos conceptos forman la base para construir aplicaciones escalables y seguras utilizando **Entity Framework Core**.
+
+# 📅 Día 3: Ciclos de Vida (DI), Fábricas, Logging Estructurado y Servicios de Negocio
+
+En esta etapa se incorporan conceptos fundamentales para construir aplicaciones robustas utilizando **ASP.NET Core** y **Entity Framework Core**:
+
+- Ciclos de vida de la **Inyección de Dependencias (DI)**.
+- Uso de **IDbContextFactory** para operaciones concurrentes.
+- Integración de **Serilog** para logging estructurado.
+- Separación de la lógica de negocio mediante un **Servicio de Aplicación**.
+- Implementación de una estrategia automática de **reintentos por concurrencia**.
+
+---
+
+# 📦 Paso 10: Instalación de Dependencias
+
+Instala **Serilog** para disponer de un sistema de logging estructurado.
+
+```bash
+dotnet add Library.Api package Serilog.AspNetCore
+```
+
+---
+
+# 🔧 Paso 11: Configuración de Servicios y Serilog (`Program.cs`)
+
+Actualiza la sección **Builder** del archivo `Program.cs`.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Serilog;
+using Library.Data;
+using Library.Api.Fulfillment;
+
+var builder = WebApplication.CreateBuilder(args);
+```
+
+---
+
+## Configurar Serilog
+
+```csharp
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .WriteTo.File(
+        "logs/fulfillment-log-.log",
+        rollingInterval: RollingInterval.Day)
+    .CreateLogger();
+
+builder.Host.UseSerilog();
+```
+
+### ¿Qué hace esta configuración?
+
+- Envía logs a la consola.
+- Genera archivos de log diarios.
+- Sustituye el logger predeterminado de ASP.NET Core.
+
+---
+
+# 💡 Ciclos de Vida (Dependency Injection)
+
+ASP.NET Core ofrece tres ciclos de vida para los servicios.
+
+|Lifetime|Descripción|Casos de uso|
+|--------|-----------|------------|
+|`Transient`|Nueva instancia cada vez que se solicita.|Servicios ligeros sin estado.|
+|`Scoped`|Una instancia por petición HTTP.|DbContext, repositorios.|
+|`Singleton`|Una única instancia durante toda la aplicación.|Configuraciones, cachés, clientes reutilizables.|
+
+Visualmente:
+
+```text
+HTTP Request 1
+
+Scoped A
+Singleton
+Transient 1
+Transient 2
+
+--------------------------
+
+HTTP Request 2
+
+Scoped B
+Singleton
+Transient 3
+Transient 4
+```
+
+---
+
+## Registrar el DbContext
+
+```csharp
+var connString =
+    builder.Configuration.GetConnectionString("DefaultConnection");
+
+builder.Services.AddDbContext<LibraryDbContext>(
+    options => options.UseSqlServer(connString),
+    ServiceLifetime.Scoped,
+    ServiceLifetime.Singleton);
+```
+
+> 💡 **Nota**
+>
+> El `DbContext` normalmente utiliza un ciclo de vida **Scoped**, ya que cada petición HTTP debe trabajar con su propio contexto.
+
+---
+
+# 🏭 ¿Por qué utilizar `IDbContextFactory`?
+
+En escenarios donde:
+
+- existen múltiples tareas asíncronas,
+- procesamiento paralelo,
+- Background Services,
+- o múltiples operaciones concurrentes,
+
+es recomendable crear nuevos `DbContext` bajo demanda.
+
+```csharp
+builder.Services.AddDbContextFactory<LibraryDbContext>(
+    options => options.UseSqlServer(connString));
+```
+
+Posteriormente puede utilizarse así:
+
+```csharp
+await using var db =
+    await factory.CreateDbContextAsync(ct);
+```
+
+### Ventajas
+
+- Evita compartir un mismo `DbContext`.
+- Reduce problemas de concurrencia.
+- Cada operación obtiene un contexto independiente.
+
+---
+
+# Registrar Servicios de Negocio
+
+La lógica de negocio debe depender de interfaces.
+
+```csharp
+builder.Services.AddScoped<
+    IFulfillmentService,
+    FulfillmentService>();
+```
+
+Esto permite:
+
+- Inversión de dependencias.
+- Facilidad para pruebas unitarias.
+- Bajo acoplamiento.
+
+Finalmente:
+
+```csharp
+builder.Services.AddEndpointsApiExplorer();
+
+builder.Services.AddSwaggerGen();
+```
+
+---
+
+# 🚀 Paso 12: Endpoints de Negocio
+
+## Crear la aplicación
+
+```csharp
+var app = builder.Build();
+
+app.UseSwagger();
+
+app.UseSwaggerUI();
+```
+
+---
+
+## DTO de entrada
+
+```csharp
+public record OrderPayload(
+    int CustomerId,
+    int ProductId,
+    int Quantity);
+```
+
+> 💡 Los **Records** son ideales para DTOs porque son inmutables y ligeros.
+
+---
+
+# Endpoint para restaurar el inventario
+
+```csharp
+app.MapPost("/inventory/reset",
+    (LibraryDbContext db,
+     ILogger<Program> logger) =>
+{
+    logger.LogInformation(
+        "Iniciando restauración del inventario.");
+
+    foreach (InventoryItem inv in db.Inventory)
+    {
+        switch (inv.Id)
+        {
+            case 1:
+                inv.CurrentStock = 5;
+                break;
+
+            case 2:
+                inv.CurrentStock = 3;
+                break;
+
+            case 3:
+                inv.CurrentStock = 8;
+                break;
+        }
+    }
+
+    db.SaveChanges();
+
+    logger.LogInformation(
+        "Inventario restaurado correctamente.");
+
+    return Results.Ok("stock reset");
+});
+```
+
+### Objetivo
+
+Facilitar pruebas de integración restableciendo el inventario.
+
+---
+
+# Endpoint para crear órdenes
+
+```csharp
+app.MapPost("/orders",
+async (
+    OrderPayload orderRequest,
+    IDbContextFactory<LibraryDbContext> factory,
+    CancellationToken ct,
+    IFulfillmentService service) =>
+{
+    await using var db =
+        await factory.CreateDbContextAsync(ct);
+
+    var newOrder = new Order
+    {
+        CustomerId = orderRequest.CustomerId,
+        Priority = Priority.Normal,
+
+        Lines =
+        {
+            new OrderLine
+            {
+                ProductId = orderRequest.ProductId,
+                Quantity = orderRequest.Quantity
+            }
+        }
+    };
+
+    db.Orders.Add(newOrder);
+
+    await db.SaveChangesAsync(ct);
+
+    FulfillmentResult result =
+        await service.FulfillOneAsync(
+            newOrder.Id,
+            ct);
+
+    return Results.Ok(new
+    {
+        orderId = newOrder.Id,
+        result = result.ToString()
+    });
+});
+```
+
+### Flujo del endpoint
+
+```text
+HTTP Request
+
+      │
+
+Crear DbContext
+
+      │
+
+Crear Orden
+
+      │
+
+Guardar
+
+      │
+
+Invocar Servicio
+
+      │
+
+Procesar Inventario
+
+      │
+
+Responder
+```
+
+---
+
+# 👔 Paso 13: Servicio de Negocio
+
+Crea la carpeta:
+
+```text
+Library.Api
+│
+└── Fulfillment
+    │
+    ├── IFulfillmentService.cs
+    └── FulfillmentService.cs
+```
+
+---
+
+## Resultado del procesamiento
+
+```csharp
+public enum FulfillmentResult
+{
+    Fulfilled,
+    Backordered
+}
+```
+
+---
+
+## Resultado agregado
+
+```csharp
+public record BurstResult(
+    int Fulfilled,
+    int Backordered);
+```
+
+---
+
+## Contrato del servicio
+
+```csharp
+public interface IFulfillmentService
+{
+    Task<FulfillmentResult>
+        FulfillOneAsync(
+            int orderId,
+            CancellationToken ct);
+}
+```
+
+---
+
+# Implementación
+
+```csharp
+public class FulfillmentService
+    : IFulfillmentService
+{
+    private readonly
+        IDbContextFactory<LibraryDbContext>
+        _factory;
+
+    public FulfillmentService(
+        IDbContextFactory<LibraryDbContext> factory)
+    {
+        _factory = factory;
+    }
+
+    public async Task<FulfillmentResult>
+        FulfillOneAsync(
+            int orderId,
+            CancellationToken ct)
+    {
+        ...
+    }
+}
+```
+
+---
+
+# Flujo interno del servicio
+
+```text
+Obtener Orden
+
+        │
+
+Cargar Líneas
+
+        │
+
+Consultar Inventario
+
+        │
+
+¿Hay Stock?
+
+   ┌──────────────┐
+   │              │
+  Sí             No
+   │              │
+Actualizar      Backordered
+Stock             │
+   │              │
+Guardar           │
+   │              │
+ Fulfilled ◄──────┘
+```
+
+---
+
+# Caso: Stock insuficiente
+
+```csharp
+if (!canFulfill)
+{
+    order.Status = Status.Backordered;
+
+    db.FulfillmentEvents.Add(
+        new FulfillmentEvent
+        {
+            OrderId = orderId,
+            Type = "Backorder"
+        });
+
+    await db.SaveChangesAsync(ct);
+
+    Log.Warning(
+        "Orden {OrderId} enviada a Backordered.",
+        orderId);
+
+    return FulfillmentResult.Backordered;
+}
+```
+
+---
+
+# Caso: Stock suficiente
+
+```csharp
+order.Status = Status.Fulfilled;
+
+order.CompletedUtc = DateTime.UtcNow;
+
+db.FulfillmentEvents.Add(
+    new FulfillmentEvent
+    {
+        OrderId = orderId,
+        Type = "Fulfilled"
+    });
+```
+
+Posteriormente se intenta guardar aplicando una política automática de reintentos.
+
+---
+
+# 🔄 Algoritmo de Reintentos
+
+```text
+Guardar
+
+   │
+
+¿Concurrencia?
+
+   │
+
+No────────► Finalizar
+
+   │
+
+Sí
+
+   │
+
+Recargar datos
+
+   │
+
+Actualizar RowVersion
+
+   │
+
+Recalcular Stock
+
+   │
+
+Guardar nuevamente
+```
+
+---
+
+## Método `SaveWithRetryAsync`
+
+```csharp
+private static async Task<bool>
+SaveWithRetryAsync(...)
+{
+    for (int attempt = 0; ; attempt++)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+
+            return true;
+        }
+        catch (DbUpdateConcurrencyException ex)
+            when (attempt < 3)
+        {
+            ...
+        }
+    }
+}
+```
+
+---
+
+# ¿Qué ocurre cuando existe una colisión?
+
+Cada conflicto produce una excepción.
+
+```text
+DbUpdateConcurrencyException
+```
+
+El algoritmo realiza:
+
+1. Captura la excepción.
+2. Consulta nuevamente la base de datos.
+3. Actualiza el `RowVersion`.
+4. Recalcula el inventario.
+5. Reintenta guardar.
+
+---
+
+## Recargar los valores actuales
+
+```csharp
+var current =
+    await entry.GetDatabaseValuesAsync();
+```
+
+---
+
+## Sincronizar el Change Tracker
+
+```csharp
+entry.OriginalValues
+    .SetValues(current);
+```
+
+---
+
+## Obtener el stock actualizado
+
+```csharp
+int freshValue =
+    current.GetValue<int>(
+        nameof(InventoryItem.CurrentStock));
+```
+
+---
+
+## Verificar nuevamente
+
+```csharp
+if (freshValue < desiredAmount)
+    return false;
+```
+
+---
+
+## Recalcular el inventario
+
+```csharp
+inv.CurrentStock =
+    freshValue - desiredAmount;
+```
+
+---
+
+# ¿Qué sucede si fallan los tres intentos?
+
+El servicio cambia automáticamente la orden a:
+
+```text
+Backordered
+```
+
+Esto garantiza que:
+
+- Nunca se venda inventario inexistente.
+- No se pierda consistencia.
+- Se mantenga la integridad de los datos.
+
+---
+
+# Logging estructurado
+
+Durante todo el proceso se registran eventos relevantes.
+
+```csharp
+Log.Information(
+    "Orden {OrderId} procesada correctamente.",
+    orderId);
+
+Log.Warning(
+    "Orden {OrderId} enviada a Backordered.",
+    orderId);
+```
+
+### Ventajas
+
+- Los parámetros permanecen estructurados.
+- Fácil integración con Elastic, Seq, Azure Monitor, Datadog, etc.
+- Consultas eficientes sobre los logs.
+
+---
+
+# 📌 Conceptos aprendidos
+
+Al finalizar este día habrás aprendido:
+
+- ✅ Dependency Injection.
+- ✅ Ciclos de vida (`Transient`, `Scoped`, `Singleton`).
+- ✅ `IDbContextFactory`.
+- ✅ Logging estructurado con Serilog.
+- ✅ Registro de servicios.
+- ✅ Separación entre API y lógica de negocio.
+- ✅ Servicios orientados a interfaces.
+- ✅ DTOs utilizando Records.
+- ✅ Procesamiento de órdenes.
+- ✅ Manejo de inventario.
+- ✅ Estrategias de resiliencia.
+- ✅ Reintentos automáticos.
+- ✅ Manejo de concurrencia optimista.
+- ✅ Arquitectura desacoplada y mantenible.
+
+Estos conceptos constituyen la base para desarrollar aplicaciones empresariales escalables utilizando **ASP.NET Core**, **Entity Framework Core** y **Serilog**.
+
+# 📅 Día 4: Procesamiento Concurrente y Benchmarks (Parte 1)
+
+Durante esta etapa el proyecto evoluciona de un procesamiento síncrono a una arquitectura preparada para manejar **múltiples órdenes concurrentes** de forma segura y escalable.
+
+Los objetivos principales de este día son:
+
+- Procesar órdenes de forma concurrente.
+- Evitar bloqueos durante las peticiones HTTP.
+- Utilizar colas thread-safe.
+- Desacoplar el procesamiento de las solicitudes del usuario.
+- Evitar sobreventa (**Oversell**) mediante concurrencia optimista.
+- Implementar una política automática de reintentos.
+
+---
+
+# 🚀 Objetivos del Día
+
+Al finalizar esta sección tendrás implementado:
+
+- ✅ Procesamiento en Background.
+- ✅ Cola de trabajos.
+- ✅ Workers concurrentes.
+- ✅ `BackgroundService`.
+- ✅ `Channel<T>`.
+- ✅ `PriorityQueue<T>`.
+- ✅ `ConcurrentQueue<T>`.
+- ✅ `IDbContextFactory`.
+- ✅ Reintentos automáticos por concurrencia.
+- ✅ Protección contra Overselling.
+
+---
+
+# 📦 Paso 14: Procesamiento Concurrente de Órdenes
+
+Hasta este momento cada petición HTTP procesaba completamente una orden.
+
+```text
+Cliente
+
+    │
+
+POST /orders
+
+    │
+
+Crear Orden
+
+    │
+
+Consultar Inventario
+
+    │
+
+Actualizar Stock
+
+    │
+
+Guardar
+
+    │
+
+Respuesta HTTP
+```
+
+Este modelo funciona correctamente para pocas peticiones, pero presenta problemas cuando llegan decenas o cientos de órdenes simultáneamente.
+
+---
+
+## Problema
+
+Si 100 clientes realizan compras al mismo tiempo:
+
+```text
+Cliente 1 ───────┐
+
+Cliente 2 ───────┤
+
+Cliente 3 ───────┤
+
+Cliente 4 ───────┤
+
+Cliente 5 ───────┘
+
+        ↓
+
+ASP.NET Core
+
+        ↓
+
+Todos intentan modificar
+el mismo inventario
+```
+
+Esto puede provocar:
+
+- Mayor contención.
+- Más conflictos de concurrencia.
+- Threads ocupados esperando I/O.
+- Mayor tiempo de respuesta.
+
+---
+
+# 💡 Solución
+
+Separar la recepción de la orden de su procesamiento.
+
+El endpoint únicamente:
+
+1. Recibe la solicitud.
+2. Encola un trabajo.
+3. Devuelve una respuesta inmediata.
+
+Mientras tanto, un proceso en segundo plano realiza el trabajo pesado.
+
+```text
+Cliente
+
+     │
+
+POST /orders
+
+     │
+
+ Encolar Trabajo
+
+     │
+
+HTTP 202 Accepted
+
+     │
+
+-------------------------
+
+Background Worker
+
+     │
+
+Procesar Orden
+
+     │
+
+Actualizar Inventario
+
+     │
+
+Guardar Cambios
+```
+
+Este patrón recibe el nombre de:
+
+> **Producer / Consumer Pattern**
+
+---
+
+# 🧵 ¿Por qué NO compartir un DbContext?
+
+Un error muy común consiste en reutilizar un mismo `DbContext` entre varios hilos.
+
+```text
+Thread A
+
+        │
+
+        ▼
+
+      DbContext
+
+        ▲
+
+        │
+
+Thread B
+```
+
+Esto es incorrecto.
+
+> ⚠️ **Entity Framework Core NO es Thread Safe.**
+
+Cada operación concurrente debe utilizar su propia instancia.
+
+La solución consiste en utilizar:
+
+```csharp
+IDbContextFactory<LibraryDbContext>
+```
+
+para crear un nuevo contexto por cada trabajo.
+
+---
+
+# 🏭 IDbContextFactory
+
+```csharp
+await using var db =
+    await factory.CreateDbContextAsync(ct);
+```
+
+Cada llamada devuelve:
+
+```text
+Trabajo 1
+
+    │
+
+DbContext #1
+
+-------------------
+
+Trabajo 2
+
+    │
+
+DbContext #2
+
+-------------------
+
+Trabajo 3
+
+    │
+
+DbContext #3
+```
+
+De esta manera no existe interferencia entre operaciones.
+
+---
+
+# 🧰 Opciones de Cola
+
+.NET ofrece varias estructuras para implementar colas concurrentes.
+
+Las tres más utilizadas son:
+
+- `PriorityQueue`
+- `Channel`
+- `ConcurrentQueue`
+
+Cada una resuelve un problema distinto.
+
+---
+
+# Opción 1: PriorityQueue
+
+`PriorityQueue<TElement,TPriority>` fue incorporada en .NET y permite ordenar elementos según una prioridad numérica.
+
+```csharp
+var queue =
+    new PriorityQueue<int,int>();
+
+queue.Enqueue(
+    orderIdExpedited,
+    (int)Priority.Expedited);
+
+queue.Enqueue(
+    orderIdNormal,
+    (int)Priority.Normal);
+
+int nextOrder = queue.Dequeue();
+```
+
+---
+
+## Funcionamiento
+
+Supongamos:
+
+```text
+Priority.Expedited = 0
+
+Priority.Normal = 1
+```
+
+La cola queda así:
+
+```text
+Enqueue
+
+Normal
+
+Expedited
+
+Normal
+
+Expedited
+```
+
+Internamente:
+
+```text
+Prioridad
+
+0
+
+0
+
+1
+
+1
+```
+
+Al desencolar:
+
+```text
+Sale primero:
+
+Expedited
+
+↓
+
+Expedited
+
+↓
+
+Normal
+
+↓
+
+Normal
+```
+
+---
+
+## ¿Cuándo utilizar PriorityQueue?
+
+Ideal cuando existen prioridades reales.
+
+Por ejemplo:
+
+- Clientes Premium.
+- Pedidos Urgentes.
+- Tickets críticos.
+- Procesamiento financiero.
+
+---
+
+# Opción 2: Channel<T>
+
+`Channel<T>` pertenece al paquete:
+
+```text
+System.Threading.Channels
+```
+
+Está diseñado específicamente para arquitecturas:
+
+- Producer / Consumer.
+- Background Workers.
+- Procesamiento Asíncrono.
+
+Es la opción recomendada para ASP.NET Core.
+
+---
+
+## Registro del Channel
+
+```csharp
+builder.Services.AddSingleton(_ =>
+    Channel.CreateBounded<int>(
+        new BoundedChannelOptions(100)
+        {
+            FullMode =
+                BoundedChannelFullMode.Wait
+        }));
+```
+
+También puede utilizarse un canal sin límite:
+
+```csharp
+builder.Services.AddSingleton(_ =>
+    Channel.CreateUnbounded<int>());
+```
+
+---
+
+# ¿Qué significa Bounded?
+
+El canal posee una capacidad máxima.
+
+```text
+Capacidad = 100
+```
+
+Visualmente:
+
+```text
+□□□□□□□□□□
+
+100 espacios
+```
+
+Cuando se llena:
+
+```text
+■■■■■■■■■■
+```
+
+El productor deberá esperar.
+
+Este comportamiento recibe el nombre de:
+
+> **Backpressure**
+
+---
+
+# ¿Qué es Backpressure?
+
+Supongamos:
+
+```text
+Productor
+
+1000 órdenes por segundo
+
+↓
+
+Canal
+
+Capacidad 100
+
+↓
+
+Worker
+
+50 órdenes por segundo
+```
+
+Sin límite:
+
+```text
+Memoria
+
+████████████████████████
+```
+
+Con Backpressure:
+
+```text
+Productor
+
+↓
+
+Esperar
+
+↓
+
+Canal
+
+↓
+
+Worker
+```
+
+Se evita el crecimiento infinito de memoria.
+
+---
+
+# BackgroundService
+
+El consumidor normalmente se implementa mediante:
+
+```csharp
+builder.Services.AddHostedService<
+    OrderProcessingService>();
+```
+
+Su responsabilidad consiste en leer continuamente el canal.
+
+```csharp
+await foreach (
+    var orderId
+    in channel.Reader.ReadAllAsync())
+{
+    ...
+}
+```
+
+---
+
+# Opción 3: ConcurrentQueue
+
+Otra alternativa es:
+
+```text
+ConcurrentQueue<T>
+```
+
+Es una cola FIFO completamente thread-safe.
+
+```text
+Entrada
+
+A
+
+B
+
+C
+
+D
+
+↓
+
+Salida
+
+A
+
+↓
+
+B
+
+↓
+
+C
+
+↓
+
+D
+```
+
+---
+
+## Ventajas
+
+- Muy rápida.
+- Thread-safe.
+- Lock-Free.
+
+---
+
+## Limitaciones
+
+No posee:
+
+- Prioridades.
+- Operaciones asíncronas.
+- Backpressure.
+
+Frecuentemente se combina con:
+
+- `SemaphoreSlim`
+- `Task`
+- `AutoResetEvent`
+
+---
+
+# Comparativa
+
+|Característica|PriorityQueue|Channel|ConcurrentQueue|
+|--------------|-------------|--------|----------------|
+|Prioridades|✅|❌|❌|
+|FIFO|❌|✅|✅|
+|Lectura asíncrona|❌|✅|❌|
+|Backpressure|❌|✅|❌|
+|Thread Safe|✅|✅|✅|
+|Ideal para|Procesamiento prioritario|Pipelines|Colas simples|
+
+---
+
+# ¿Cuál utilizar?
+
+## PriorityQueue
+
+```text
+Pedidos Express
+
+↓
+
+Procesar primero
+```
+
+---
+
+## Channel
+
+```text
+HTTP Request
+
+↓
+
+Canal
+
+↓
+
+Background Worker
+```
+
+Es la opción más utilizada en aplicaciones empresariales.
+
+---
+
+## ConcurrentQueue
+
+```text
+Cola simple
+
+↓
+
+Consumidor
+
+↓
+
+Procesamiento
+```
+
+Ideal para escenarios sencillos.
+
+---
+
+# Implementación con Channel
+
+## Registrar servicios
+
+```csharp
+builder.Services.AddSingleton(
+    _ => Channel.CreateUnbounded<int>());
+
+builder.Services.AddHostedService<
+    OrderProcessingService>();
+```
+
+---
+
+# Endpoint `/orders/burst`
+
+Este endpoint genera múltiples órdenes concurrentes.
+
+```csharp
+app.MapPost("/orders/burst",
+(
+    int n,
+    Channel<int> channel,
+    ILogger<Program> logger) =>
+{
+    logger.LogInformation(
+        "Encolando {Count} órdenes.", n);
+
+    for (int i = 1; i <= n; i++)
+    {
+        channel.Writer.TryWrite(i);
+    }
+
+    return Results.Accepted(
+        $"Procesando {n} órdenes.");
+});
+```
+
+---
+
+## Flujo del endpoint
+
+```text
+Cliente
+
+      │
+
+POST /orders/burst?n=50
+
+      │
+
+Encolar 50 IDs
+
+      │
+
+HTTP 202 Accepted
+
+      │
+
+Fin de la petición
+```
+
+---
+
+# BackgroundService
+
+```csharp
+public class OrderProcessingService
+    : BackgroundService
+{
+    private readonly Channel<int> _channel;
+
+    private readonly
+        IDbContextFactory<LibraryDbContext>
+        _factory;
+
+    private readonly
+        ILogger<OrderProcessingService>
+        _logger;
+
+    public OrderProcessingService(
+        Channel<int> channel,
+        IDbContextFactory<LibraryDbContext> factory,
+        ILogger<OrderProcessingService> logger)
+    {
+        _channel = channel;
+        _factory = factory;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(
+        CancellationToken stoppingToken)
+    {
+        await foreach (
+            var orderId
+            in _channel.Reader.ReadAllAsync(
+                stoppingToken))
+        {
+            await ProcessOrderAsync(
+                orderId,
+                stoppingToken);
+        }
+    }
+}
+```
+
+---
+
+# Procesar cada orden
+
+```csharp
+private async Task ProcessOrderAsync(
+    int orderId,
+    CancellationToken ct)
+{
+    using var db =
+        _factory.CreateDbContext();
+
+    _logger.LogInformation(
+        "Procesando orden {OrderId}",
+        orderId);
+
+    await Task.Delay(50, ct);
+
+    // Aquí se aplicaría la lógica
+    // de actualización de inventario.
+}
+```
+
+Cada orden obtiene su propio `DbContext`.
+
+---
+
+# Arquitectura completa
+
+```mermaid
+flowchart TD
+
+A[Cliente HTTP]
+
+A -->|POST /orders/burst| B[Minimal API]
+
+B --> C[Channel]
+
+C --> D[Worker 1]
+
+C --> E[Worker 2]
+
+C --> F[Worker 3]
+
+D --> G[(SQL Server)]
+
+E --> G
+
+F --> G
+```
+
+---
+
+# Beneficios del patrón
+
+Este diseño ofrece múltiples ventajas:
+
+- ✅ Respuesta HTTP inmediata.
+- ✅ Procesamiento desacoplado.
+- ✅ Escalabilidad horizontal.
+- ✅ Workers independientes.
+- ✅ Menor tiempo de espera para el usuario.
+- ✅ Uso seguro de `DbContext`.
+- ✅ Preparado para manejar miles de órdenes concurrentes.
+
+---
+
+# 💾 Paso 15: Concurrencia Optimista y Reintentos Automáticos
+
+Una vez que el sistema comienza a procesar múltiples órdenes en paralelo aparece un problema fundamental:
+
+> ¿Qué ocurre cuando dos o más procesos intentan actualizar simultáneamente el mismo registro del inventario?
+
+Este escenario recibe el nombre de **Condición de Carrera (Race Condition)** y puede provocar inconsistencias como vender más productos de los que realmente existen (**Overselling**).
+
+---
+
+# 🚨 El problema del Overselling
+
+Supongamos el siguiente inventario:
+
+```text
+Producto A
+
+Stock = 1
+```
+
+Dos clientes compran al mismo tiempo.
+
+```text
+Cliente A
+
+↓
+
+Leer Stock = 1
+
+-----------------------
+
+Cliente B
+
+↓
+
+Leer Stock = 1
+```
+
+Ambos creen que existe una unidad disponible.
+
+Posteriormente ambos descuentan el inventario.
+
+```text
+Cliente A
+
+1 → 0
+
+Guardar ✔
+
+----------------------
+
+Cliente B
+
+1 → 0
+
+Guardar ✔
+```
+
+Resultado:
+
+```text
+Se vendieron
+
+2 productos
+
+↓
+
+Existía
+
+1 producto
+```
+
+El sistema acaba de vender inventario inexistente.
+
+---
+
+# 💡 Solución: Concurrencia Optimista
+
+En lugar de bloquear registros, **Entity Framework Core** utiliza un mecanismo denominado:
+
+> **Optimistic Concurrency**
+
+La idea es sencilla.
+
+Cada fila posee un identificador que cambia cada vez que la fila es modificada.
+
+Ese identificador normalmente es:
+
+```text
+RowVersion
+```
+
+---
+
+# ¿Cómo funciona RowVersion?
+
+Supongamos el siguiente registro.
+
+```text
+Producto
+
+Stock = 10
+
+RowVersion = 15
+```
+
+Dos procesos lo leen simultáneamente.
+
+```text
+Proceso A
+
+Stock = 10
+
+RowVersion = 15
+
+---------------------
+
+Proceso B
+
+Stock = 10
+
+RowVersion = 15
+```
+
+---
+
+## Primer proceso
+
+Actualiza correctamente.
+
+```text
+Stock = 9
+
+RowVersion = 16
+```
+
+---
+
+## Segundo proceso
+
+Todavía conserva:
+
+```text
+RowVersion = 15
+```
+
+Cuando intenta ejecutar:
+
+```csharp
+db.SaveChanges();
+```
+
+EF Core genera internamente una consulta similar a:
+
+```sql
+UPDATE Inventory
+SET CurrentStock = 8
+WHERE Id = 1
+AND RowVersion = 15;
+```
+
+Pero en la base de datos ya existe:
+
+```text
+RowVersion = 16
+```
+
+No se actualiza ninguna fila.
+
+EF Core detecta esta situación y lanza:
+
+```text
+DbUpdateConcurrencyException
+```
+
+---
+
+# Flujo completo
+
+```mermaid
+flowchart TD
+
+A[Leer Registro]
+
+A --> B[Modificar Stock]
+
+B --> C[SaveChanges]
+
+C --> D{¿RowVersion coincide?}
+
+D -->|Sí| E[Guardar]
+
+D -->|No| F[DbUpdateConcurrencyException]
+```
+
+---
+
+# Implementar una política de reintentos
+
+En lugar de fallar inmediatamente, el servicio puede intentar nuevamente.
+
+El algoritmo sigue el patrón:
+
+```text
+Intentar
+
+↓
+
+¿Conflicto?
+
+↓
+
+Recargar datos
+
+↓
+
+Recalcular
+
+↓
+
+Guardar otra vez
+```
+
+---
+
+## Implementación
+
+```csharp
+async Task<bool> SaveWithRetryAsync(
+    LibraryDbContext db,
+    ILogger logger)
+{
+    for (int attempt = 1; attempt <= 3; attempt++)
+    {
+        try
+        {
+            await db.SaveChangesAsync();
+
+            return true;
+        }
+        catch (DbUpdateConcurrencyException ex)
+            when (attempt < 3)
+        {
+            var entry = ex.Entries.Single();
+
+            var databaseValues =
+                await entry.GetDatabaseValuesAsync();
+
+            entry.OriginalValues.SetValues(databaseValues!);
+
+            var currentStock =
+                databaseValues!
+                    .GetValue<int>("CurrentStock");
+
+            if (currentStock <= 0)
+            {
+                logger.LogWarning(
+                    "Inventario agotado.");
+
+                return false;
+            }
+
+            entry.CurrentValues["CurrentStock"] =
+                currentStock -
+                (int)entry.CurrentValues["Quantity"];
+        }
+    }
+
+    return false;
+}
+```
+
+---
+
+# ¿Qué ocurre internamente?
+
+## Primer intento
+
+```text
+Guardar
+
+↓
+
+DbUpdateConcurrencyException
+```
+
+---
+
+## Recargar información
+
+```csharp
+var databaseValues =
+    await entry.GetDatabaseValuesAsync();
+```
+
+Ahora conocemos el estado real del inventario.
+
+---
+
+## Actualizar el Change Tracker
+
+```csharp
+entry.OriginalValues.SetValues(databaseValues);
+```
+
+Esto sincroniza el nuevo `RowVersion`.
+
+---
+
+## Recalcular
+
+```text
+Stock Actual
+
+↓
+
+Aplicar nuevamente
+
+↓
+
+Nuevo Stock
+```
+
+---
+
+## Reintentar
+
+```csharp
+await db.SaveChangesAsync();
+```
+
+Si vuelve a existir un conflicto:
+
+```text
+Intento 2
+```
+
+Y nuevamente:
+
+```text
+Intento 3
+```
+
+---
+
+# ¿Qué ocurre después del tercer intento?
+
+Si incluso después de tres intentos continúa existiendo conflicto, el sistema asume que otro proceso consumió definitivamente el inventario.
+
+La orden cambia automáticamente a:
+
+```text
+Backordered
+```
+
+En lugar de vender inventario inexistente.
+
+---
+
+# Diagrama del algoritmo
+
+```mermaid
+flowchart TD
+
+A[SaveChanges]
+
+A --> B{¿Concurrencia?}
+
+B -->|No| C[Éxito]
+
+B -->|Sí| D[Leer datos actuales]
+
+D --> E[Actualizar RowVersion]
+
+E --> F[Recalcular inventario]
+
+F --> G{¿Intentos < 3?}
+
+G -->|Sí| A
+
+G -->|No| H[Backordered]
+```
+
+---
+
+# Beneficios
+
+- Nunca existe stock negativo.
+- No se bloquean registros.
+- Mayor rendimiento.
+- Compatible con múltiples servidores.
+- Ideal para aplicaciones web.
+
+---
+
+# 🚀 Paso 16: Benchmark y Medición de Rendimiento
+
+Una vez implementado el procesamiento concurrente, resulta útil medir si realmente existe una mejora.
+
+Para ello se crea el endpoint:
+
+```text
+POST /benchmark
+```
+
+Su objetivo consiste en comparar:
+
+- Procesamiento secuencial.
+- Procesamiento paralelo.
+
+---
+
+# ¿Por qué medir?
+
+Una optimización debe demostrarse con datos.
+
+El benchmark responde preguntas como:
+
+- ¿Es realmente más rápido?
+- ¿Cuánto mejora?
+- ¿Vale la pena la complejidad añadida?
+
+---
+
+# Stopwatch
+
+.NET incluye la clase:
+
+```csharp
+Stopwatch
+```
+
+Su uso es muy sencillo.
+
+```csharp
+var sw = Stopwatch.StartNew();
+
+// Código
+
+sw.Stop();
+
+Console.WriteLine(sw.Elapsed);
+```
+
+---
+
+# Endpoint `/benchmark`
+
+```csharp
+app.MapPost("/benchmark",
+async (
+    IDbContextFactory<LibraryDbContext> factory) =>
+{
+    const int N = 100;
+
+    await ResetInventoryToBaseline();
+
+    var sw = Stopwatch.StartNew();
+
+    for (int i = 0; i < N; i++)
+    {
+        using var db =
+            factory.CreateDbContext();
+
+        var item =
+            await db.Inventory.FindAsync(1);
+
+        item.CurrentStock--;
+
+        await db.SaveChangesAsync();
+    }
+
+    sw.Stop();
+
+    var sequential =
+        sw.Elapsed;
+
+    await ResetInventoryToBaseline();
+
+    sw.Restart();
+
+    var tasks =
+        Enumerable.Range(0, N)
+        .Select(async i =>
+        {
+            using var db =
+                factory.CreateDbContext();
+
+            var item =
+                await db.Inventory.FindAsync(1);
+
+            item.CurrentStock--;
+
+            await db.SaveChangesAsync();
+        });
+
+    await Task.WhenAll(tasks);
+
+    sw.Stop();
+
+    var parallel =
+        sw.Elapsed;
+
+    return Results.Ok(new
+    {
+        Sequential = sequential,
+        Parallel = parallel,
+        Speedup =
+            Math.Round(
+                sequential.TotalMilliseconds /
+                parallel.TotalMilliseconds,
+                2)
+    });
+});
+```
+
+---
+
+# Flujo del Benchmark
+
+```mermaid
+flowchart TD
+
+A[Reset Inventario]
+
+A --> B[Ejecutar Secuencial]
+
+B --> C[Guardar Tiempo]
+
+C --> D[Reset Inventario]
+
+D --> E[Ejecutar Paralelo]
+
+E --> F[Guardar Tiempo]
+
+F --> G[Calcular Speedup]
+```
+
+---
+
+# ¿Qué es el Speedup?
+
+Es la relación entre ambos tiempos.
+
+```text
+Speedup =
+
+Tiempo Secuencial
+
+---------------------
+
+Tiempo Paralelo
+```
+
+Ejemplo:
+
+|Modo|Tiempo|
+|----|------:|
+|Secuencial|12000 ms|
+|Paralelo|4000 ms|
+
+```text
+12000 / 4000 = 3
+```
+
+Resultado:
+
+```text
+3×
+
+Más rápido
+```
+
+---
+
+# ¿Por qué reiniciar el inventario?
+
+Antes de cada prueba se debe restaurar el stock.
+
+```text
+Secuencial
+
+↓
+
+Stock = 100
+
+↓
+
+Benchmark
+
+---------------------
+
+Paralelo
+
+↓
+
+Stock = 100
+
+↓
+
+Benchmark
+```
+
+De esta manera ambas mediciones parten de las mismas condiciones.
+
+---
+
+# 📋 Paso 17: Probes P2–P7
+
+Los **Probes** son pruebas de aceptación utilizadas para validar que el sistema cumple los objetivos de la Kata.
+
+---
+
+# P2 — Burst sin bloqueos
+
+Enviar una gran cantidad de órdenes.
+
+```bash
+curl -X POST \
+"http://localhost:5000/orders/burst?n=50"
+```
+
+Resultado esperado:
+
+```text
+HTTP 202 Accepted
+```
+
+Mientras las órdenes se procesan en segundo plano:
+
+```bash
+curl http://localhost:5000/inventory
+```
+
+El endpoint debe responder inmediatamente.
+
+---
+
+# P3 — Sin Overselling
+
+Después del Burst:
+
+```bash
+curl http://localhost:5000/inventory/verify
+```
+
+Debe comprobarse:
+
+```text
+NegativeStock = false
+
+TotalUsed == TotalFulfilled
+
+AllTerminal = true
+```
+
+---
+
+## Endpoint de verificación
+
+```csharp
+app.MapGet("/inventory/verify",
+async (LibraryDbContext db) =>
+{
+    var negative =
+        await db.Inventory.AnyAsync(
+            i => i.CurrentStock < 0);
+
+    var totalUsed =
+        await db.Inventory.SumAsync(
+            i => i.InitialStock -
+                 i.CurrentStock);
+
+    var fulfilled =
+        await db.Orders
+            .Where(o =>
+                o.Status ==
+                Status.Fulfilled)
+            .SelectMany(o => o.Lines)
+            .SumAsync(l => l.Quantity);
+
+    return new
+    {
+        NegativeStock = negative,
+
+        TotalUsed = totalUsed,
+
+        TotalFulfilled = fulfilled,
+
+        AllTerminal =
+            await db.Orders.AllAsync(
+                o => o.Status !=
+                Status.Pending)
+    };
+});
+```
+
+---
+
+# P4 — Prioridades
+
+Cuando existen órdenes:
+
+- Normal
+- Expedited
+
+Las órdenes urgentes deben finalizar primero.
+
+Puede comprobarse mediante:
+
+```bash
+curl -X POST \
+"http://localhost:5000/orders/burst?n=10"
+```
+
+Y posteriormente revisar:
+
+- Logs.
+- Reportes.
+- Tabla de órdenes.
+
+---
+
+# P5 — Benchmark
+
+Ejecutar:
+
+```bash
+curl -X POST \
+http://localhost:5000/benchmark
+```
+
+Salida esperada:
+
+```json
+{
+  "Sequential": "00:00:12",
+  "Parallel": "00:00:04",
+  "Speedup": 3.0
+}
+```
+
+---
+
+# P6 — Preparación para apagado ordenado
+
+Aunque la implementación completa se verá en la siguiente sección, la prueba consiste en:
+
+1. Ejecutar un Burst grande.
+2. Presionar **Ctrl + C**.
+3. Reiniciar la aplicación.
+4. Verificar que la base de datos permanece consistente.
+
+---
+
+# Resumen de los Probes
+
+|Probe|Objetivo|
+|------|---------|
+|P2|Procesamiento concurrente sin bloquear HTTP|
+|P3|No existe Overselling|
+|P4|Respeto de prioridades|
+|P5|Comparación de rendimiento|
+|P6|Preparación para apagado ordenado|
+
+---
+
+# 📌 Conceptos aprendidos
+
+En esta sección incorporaste:
+
+- ✅ Concurrencia Optimista.
+- ✅ `RowVersion`.
+- ✅ `DbUpdateConcurrencyException`.
+- ✅ Reintentos automáticos.
+- ✅ Protección contra Overselling.
+- ✅ Benchmarking.
+- ✅ `Stopwatch`.
+- ✅ Medición de Speedup.
+- ✅ Pruebas de aceptación (Probes P2–P6).
+
+# 🌐 Paso 18: Graceful Shutdown y `CancellationToken`
+
+Hasta este punto el sistema es capaz de procesar múltiples órdenes concurrentemente. Sin embargo, aún existe una situación crítica que debemos considerar:
+
+> ¿Qué ocurre si la aplicación se cierra mientras todavía existen órdenes procesándose?
+
+Si el servidor se detiene abruptamente podrían ocurrir problemas como:
+
+- Órdenes incompletas.
+- Transacciones parcialmente ejecutadas.
+- Logs sin escribir.
+- Trabajos perdidos.
+- Estados inconsistentes.
+
+Para evitarlo, **ASP.NET Core** implementa el concepto de **Graceful Shutdown**.
+
+---
+
+# 💡 ¿Qué es un Graceful Shutdown?
+
+Es el proceso mediante el cual una aplicación recibe una señal de apagado y dispone de unos segundos para finalizar correctamente las tareas pendientes antes de cerrarse.
+
+Ejemplo:
+
+```text
+Usuario presiona Ctrl + C
+
+        │
+
+        ▼
+
+Host recibe señal
+
+        │
+
+        ▼
+
+Cancelar nuevos trabajos
+
+        │
+
+        ▼
+
+Finalizar trabajo actual
+
+        │
+
+        ▼
+
+Guardar Logs
+
+        │
+
+        ▼
+
+Cerrar aplicación
+```
+
+---
+
+# ¿Qué ocurre cuando presionamos Ctrl + C?
+
+El Host de ASP.NET Core ejecuta internamente:
+
+```text
+ApplicationStopping
+
+↓
+
+StopAsync()
+
+↓
+
+Dispose()
+```
+
+Los `BackgroundService` reciben automáticamente un:
+
+```csharp
+CancellationToken
+```
+
+que indica que la aplicación está terminando.
+
+---
+
+# El papel del `CancellationToken`
+
+El token permite que nuestros procesos detecten cuándo deben detenerse.
+
+Ejemplo:
+
+```csharp
+while (!stoppingToken.IsCancellationRequested)
+{
+    ...
+}
+```
+
+Cuando el usuario presiona **Ctrl + C**:
+
+```text
+IsCancellationRequested
+
+false
+
+↓
+
+true
+```
+
+El servicio abandona el ciclo de procesamiento de forma ordenada.
+
+---
+
+# Worker preparado para cancelación
+
+```csharp
+protected override async Task ExecuteAsync(
+    CancellationToken stoppingToken)
+{
+    while (!stoppingToken.IsCancellationRequested)
+    {
+        if (await _orderChannel.Reader
+            .WaitToReadAsync(stoppingToken))
+        {
+            var orderId =
+                await _orderChannel.Reader
+                    .ReadAsync(stoppingToken);
+
+            await ProcessOrderAsync(
+                orderId,
+                stoppingToken);
+        }
+    }
+
+    _logger.LogInformation(
+        "Worker detenido correctamente.");
+}
+```
+
+---
+
+# Flujo del Worker
+
+```mermaid
+flowchart TD
+
+A[Esperar órdenes]
+
+A --> B[Leer del Channel]
+
+B --> C[Procesar Orden]
+
+C --> A
+
+A --> D{CancellationToken}
+
+D -->|Cancelado| E[Salir del Worker]
+```
+
+---
+
+# ¿Por qué pasar el `CancellationToken`?
+
+Siempre que un método sea asíncrono es recomendable propagar el token.
+
+```csharp
+await db.SaveChangesAsync(ct);
+
+await Task.Delay(50, ct);
+
+await factory.CreateDbContextAsync(ct);
+```
+
+De esta forma cualquier operación pendiente puede cancelarse correctamente.
+
+---
+
+# Manejo global del ciclo de vida
+
+Una buena práctica consiste en envolver toda la aplicación dentro de un bloque `try / catch / finally`.
+
+```csharp
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .WriteTo.File(
+        "logs/fulfillment-log-.txt",
+        rollingInterval: RollingInterval.Day)
+    .CreateLogger();
+
+try
+{
+    Log.Information("Iniciando aplicación");
+
+    var builder =
+        WebApplication.CreateBuilder(args);
+
+    builder.Host.UseSerilog();
+
+    var app = builder.Build();
+
+    app.MapGet("/", () => "Hello World!");
+
+    app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(
+        ex,
+        "La aplicación terminó inesperadamente");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
+```
+
+---
+
+# ¿Por qué `Log.CloseAndFlush()`?
+
+Serilog escribe información utilizando buffers.
+
+Si la aplicación termina inmediatamente:
+
+```text
+Evento
+
+↓
+
+Buffer
+
+↓
+
+X Aplicación cerrada
+```
+
+Al ejecutar:
+
+```csharp
+Log.CloseAndFlush();
+```
+
+todos los eventos pendientes son escritos físicamente.
+
+```text
+Evento
+
+↓
+
+Buffer
+
+↓
+
+Archivo
+
+↓
+
+Cerrar aplicación
+```
+
+---
+
+# Flujo completo del apagado
+
+```mermaid
+sequenceDiagram
+
+participant Console
+
+participant Host
+
+participant Worker
+
+participant Logger
+
+Console->>Host: Ctrl + C
+
+Host->>Worker: CancellationToken
+
+Worker->>Worker: Finalizar trabajo actual
+
+Worker->>Logger: Log "Stopping"
+
+Host->>Logger: CloseAndFlush()
+
+Logger-->>Host: Buffers vaciados
+
+Host-->>Console: Aplicación detenida
+```
+
+---
+
+# 🔒 Paso 19: Observabilidad con Serilog
+
+Una aplicación empresarial no solamente debe funcionar correctamente.
+
+También debe permitir responder preguntas como:
+
+- ¿Qué ocurrió?
+- ¿Cuándo ocurrió?
+- ¿Quién ejecutó la acción?
+- ¿Cuánto tiempo tardó?
+- ¿Hubo errores?
+
+A esta capacidad se le denomina:
+
+> **Observabilidad**
+
+---
+
+# Configuración recomendada
+
+```csharp
+builder.Configuration
+    .AddJsonFile("appsettings.json");
+
+Log.Logger =
+    new LoggerConfiguration()
+        .MinimumLevel.Debug()
+        .MinimumLevel.Override(
+            "Microsoft",
+            LogEventLevel.Warning)
+        .WriteTo.Console()
+        .WriteTo.File(
+            "logs/fulfillment-log-.txt",
+            rollingInterval:
+                RollingInterval.Day)
+        .CreateLogger();
+```
+
+---
+
+# Niveles de Log
+
+Serilog clasifica los eventos en distintos niveles.
+
+|Nivel|Uso recomendado|
+|------|---------------|
+|Verbose|Información extremadamente detallada.|
+|Debug|Diagnóstico durante el desarrollo.|
+|Information|Flujo normal de la aplicación.|
+|Warning|Situaciones inesperadas pero recuperables.|
+|Error|Errores que afectan una operación concreta.|
+|Fatal|Errores que provocan el cierre de la aplicación.|
+
+---
+
+# Ejemplos
+
+## Debug
+
+```csharp
+Log.Debug(
+    "Resultado interno: {@result}",
+    result);
+```
+
+---
+
+## Information
+
+```csharp
+Log.Information(
+    "Procesando orden {OrderId}",
+    id);
+```
+
+---
+
+## Warning
+
+```csharp
+Log.Warning(
+    "Stock insuficiente para la orden {OrderId}",
+    id);
+```
+
+---
+
+## Error
+
+```csharp
+Log.Error(
+    ex,
+    "Error al guardar la orden");
+```
+
+---
+
+## Fatal
+
+```csharp
+Log.Fatal(
+    ex,
+    "La aplicación terminó inesperadamente");
+```
+
+---
+
+# Logging estructurado
+
+Una gran ventaja de Serilog consiste en registrar propiedades en lugar de construir cadenas de texto.
+
+Incorrecto:
+
+```csharp
+Log.Information(
+    "Procesando orden " + id);
+```
+
+Correcto:
+
+```csharp
+Log.Information(
+    "Procesando orden {OrderId}",
+    id);
+```
+
+El segundo formato permite que herramientas como:
+
+- Seq
+- Elasticsearch
+- Azure Monitor
+- Datadog
+- Splunk
+
+indexen automáticamente el campo `OrderId`.
+
+---
+
+# Middleware Global de Excepciones
+
+En aplicaciones reales no es recomendable manejar excepciones en cada endpoint.
+
+ASP.NET Core permite centralizar esta responsabilidad.
+
+```csharp
+builder.Services
+    .AddExceptionHandler<
+        CustomExceptionHandler>();
+```
+
+---
+
+# Configuración
+
+```csharp
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+
+    app.UseHsts();
+}
+```
+
+---
+
+# Implementación
+
+```csharp
+public class CustomExceptionHandler
+    : IExceptionHandler
+{
+    private readonly
+        ILogger<CustomExceptionHandler>
+        _logger;
+
+    public CustomExceptionHandler(
+        ILogger<CustomExceptionHandler> logger)
+    {
+        _logger = logger;
+    }
+
+    public ValueTask<bool> TryHandleAsync(
+        HttpContext context,
+        Exception ex,
+        CancellationToken token)
+    {
+        _logger.LogError(
+            ex,
+            "Excepción detectada: {Message}",
+            ex.Message);
+
+        return new ValueTask<bool>(true);
+    }
+}
+```
+
+---
+
+# Beneficios
+
+- Un único punto de manejo.
+- Código más limpio.
+- Logs consistentes.
+- Respuestas homogéneas.
+
+---
+
+# 🚀 Paso 20: Resumen y Ejecución
+
+## Instalar EF Core CLI
+
+```bash
+dotnet tool install --global dotnet-ef
+```
+
+---
+
+## Crear migraciones
+
+```bash
+dotnet ef migrations add Init \
+    -p Library.Data \
+    -s Library.Api
+```
+
+---
+
+## Actualizar la base de datos
+
+```bash
+dotnet ef database update \
+    -p Library.Data \
+    -s Library.Api
+```
+
+---
+
+## Ejecutar la aplicación
+
+Linux/macOS
+
+```bash
+export ASPNETCORE_URLS="http://localhost:5000"
+
+dotnet run --project Library.Api
+```
+
+Windows PowerShell
+
+```powershell
+$env:ASPNETCORE_URLS="http://localhost:5000"
+
+dotnet run --project Library.Api
+```
+
+---
+
+## Cadena de conexión
+
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection":
+      "Server=(localdb)\\MSSQLLocalDB;Database=LibraryDb;Trusted_Connection=True;"
+  }
+}
+```
+
+---
+
+## Swagger
+
+Si Swagger está habilitado:
+
+```text
+http://localhost:5000/swagger
+```
+
+---
+
+# Flujo completo del sistema
+
+```mermaid
+flowchart LR
+
+A[Cliente]
+
+A --> B[Minimal API]
+
+B --> C[Channel]
+
+C --> D[Background Worker]
+
+D --> E[DbContextFactory]
+
+E --> F[(SQL Server)]
+
+F --> G[Serilog]
+
+G --> H[Archivo de Logs]
+```
+
+---
+
+# Checklist del Día 4
+
+Al finalizar esta etapa tu aplicación será capaz de:
+
+- ✅ Procesar cientos de órdenes concurrentemente.
+- ✅ Utilizar `Channel<T>` como cola de trabajos.
+- ✅ Ejecutar múltiples `BackgroundService`.
+- ✅ Crear un `DbContext` por operación.
+- ✅ Detectar conflictos mediante `RowVersion`.
+- ✅ Reintentar automáticamente operaciones concurrentes.
+- ✅ Evitar Overselling.
+- ✅ Medir rendimiento con `Stopwatch`.
+- ✅ Comparar procesamiento secuencial vs paralelo.
+- ✅ Validar Probes P2–P6.
+- ✅ Finalizar correctamente mediante Graceful Shutdown.
+- ✅ Cancelar tareas usando `CancellationToken`.
+- ✅ Registrar eventos estructurados con Serilog.
+- ✅ Centralizar el manejo de excepciones.
+- ✅ Mantener observabilidad completa de la aplicación.
+
+---
+
+# 📌 Conceptos aprendidos
+
+Durante el Día 4 se incorporaron varios de los conceptos más importantes para el desarrollo de aplicaciones backend modernas:
+
+## Concurrencia
+
+- `Channel<T>`
+- `PriorityQueue<T>`
+- `ConcurrentQueue<T>`
+- `BackgroundService`
+- `Producer / Consumer`
+
+## Persistencia
+
+- `IDbContextFactory`
+- `RowVersion`
+- Concurrencia Optimista
+- Reintentos automáticos
+
+## Rendimiento
+
+- `Stopwatch`
+- Benchmarking
+- Speedup
+- Procesamiento paralelo
+
+## Infraestructura
+
+- `CancellationToken`
+- Graceful Shutdown
+- Hosted Services
+- Serilog
+- Logging estructurado
+- Observabilidad
+- Middleware global de excepciones
+
+---
+
+# 🎯 Resultado Final del Día 4
+
+Con esta implementación, la aplicación evoluciona desde una **Minimal API** que procesa solicitudes de forma síncrona a una arquitectura preparada para escenarios empresariales:
+
+- Alta concurrencia.
+- Procesamiento desacoplado.
+- Resiliencia frente a conflictos.
+- Medición objetiva del rendimiento.
+- Observabilidad completa.
+- Apagado seguro.
+- Código desacoplado y mantenible.
+
+Estos patrones constituyen la base para sistemas distribuidos y aplicaciones backend escalables construidas con **ASP.NET Core**, **Entity Framework Core** y **Serilog**.
