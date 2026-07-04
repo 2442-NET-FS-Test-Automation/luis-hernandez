@@ -211,8 +211,7 @@ app.MapPost("/inventory/rest", (LibraryDbContext db, ILogger<Program> logger) =>
 // I can also take in parameters from the body
 
 // Quick method to fulfill one order
-app.MapPost("/orders", async (OrderPaylod orderRequest, IDbContextFactory<LibraryDbContext> factory,
-            CancellationToken ct, IFulfillmentService fSvc) =>
+app.MapPost("/orders", async (OrderPaylod orderRequest, IDbContextFactory<LibraryDbContext> factory, CancellationToken ct, IFulfillmentService fSvc) =>
 {
     // Remember we create an order in our db
     // And then try to create a Successful fulfillment record against the db

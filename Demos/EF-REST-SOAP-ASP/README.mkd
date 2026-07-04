@@ -946,3 +946,654 @@ Al finalizar este día habrás aprendido:
 - ✅ Uso de múltiples `DbContext` mediante `IServiceScopeFactory`.
 
 Estos conceptos forman la base para construir aplicaciones escalables y seguras utilizando **Entity Framework Core**.
+
+# 📅 Día 3: Ciclos de Vida (DI), Fábricas, Logging Estructurado y Servicios de Negocio
+
+En esta etapa se incorporan conceptos fundamentales para construir aplicaciones robustas utilizando **ASP.NET Core** y **Entity Framework Core**:
+
+- Ciclos de vida de la **Inyección de Dependencias (DI)**.
+- Uso de **IDbContextFactory** para operaciones concurrentes.
+- Integración de **Serilog** para logging estructurado.
+- Separación de la lógica de negocio mediante un **Servicio de Aplicación**.
+- Implementación de una estrategia automática de **reintentos por concurrencia**.
+
+---
+
+# 📦 Paso 10: Instalación de Dependencias
+
+Instala **Serilog** para disponer de un sistema de logging estructurado.
+
+```bash
+dotnet add Library.Api package Serilog.AspNetCore
+```
+
+---
+
+# 🔧 Paso 11: Configuración de Servicios y Serilog (`Program.cs`)
+
+Actualiza la sección **Builder** del archivo `Program.cs`.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Serilog;
+using Library.Data;
+using Library.Api.Fulfillment;
+
+var builder = WebApplication.CreateBuilder(args);
+```
+
+---
+
+## Configurar Serilog
+
+```csharp
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .WriteTo.File(
+        "logs/fulfillment-log-.log",
+        rollingInterval: RollingInterval.Day)
+    .CreateLogger();
+
+builder.Host.UseSerilog();
+```
+
+### ¿Qué hace esta configuración?
+
+- Envía logs a la consola.
+- Genera archivos de log diarios.
+- Sustituye el logger predeterminado de ASP.NET Core.
+
+---
+
+# 💡 Ciclos de Vida (Dependency Injection)
+
+ASP.NET Core ofrece tres ciclos de vida para los servicios.
+
+|Lifetime|Descripción|Casos de uso|
+|--------|-----------|------------|
+|`Transient`|Nueva instancia cada vez que se solicita.|Servicios ligeros sin estado.|
+|`Scoped`|Una instancia por petición HTTP.|DbContext, repositorios.|
+|`Singleton`|Una única instancia durante toda la aplicación.|Configuraciones, cachés, clientes reutilizables.|
+
+Visualmente:
+
+```text
+HTTP Request 1
+
+Scoped A
+Singleton
+Transient 1
+Transient 2
+
+--------------------------
+
+HTTP Request 2
+
+Scoped B
+Singleton
+Transient 3
+Transient 4
+```
+
+---
+
+## Registrar el DbContext
+
+```csharp
+var connString =
+    builder.Configuration.GetConnectionString("DefaultConnection");
+
+builder.Services.AddDbContext<LibraryDbContext>(
+    options => options.UseSqlServer(connString),
+    ServiceLifetime.Scoped,
+    ServiceLifetime.Singleton);
+```
+
+> 💡 **Nota**
+>
+> El `DbContext` normalmente utiliza un ciclo de vida **Scoped**, ya que cada petición HTTP debe trabajar con su propio contexto.
+
+---
+
+# 🏭 ¿Por qué utilizar `IDbContextFactory`?
+
+En escenarios donde:
+
+- existen múltiples tareas asíncronas,
+- procesamiento paralelo,
+- Background Services,
+- o múltiples operaciones concurrentes,
+
+es recomendable crear nuevos `DbContext` bajo demanda.
+
+```csharp
+builder.Services.AddDbContextFactory<LibraryDbContext>(
+    options => options.UseSqlServer(connString));
+```
+
+Posteriormente puede utilizarse así:
+
+```csharp
+await using var db =
+    await factory.CreateDbContextAsync(ct);
+```
+
+### Ventajas
+
+- Evita compartir un mismo `DbContext`.
+- Reduce problemas de concurrencia.
+- Cada operación obtiene un contexto independiente.
+
+---
+
+# Registrar Servicios de Negocio
+
+La lógica de negocio debe depender de interfaces.
+
+```csharp
+builder.Services.AddScoped<
+    IFulfillmentService,
+    FulfillmentService>();
+```
+
+Esto permite:
+
+- Inversión de dependencias.
+- Facilidad para pruebas unitarias.
+- Bajo acoplamiento.
+
+Finalmente:
+
+```csharp
+builder.Services.AddEndpointsApiExplorer();
+
+builder.Services.AddSwaggerGen();
+```
+
+---
+
+# 🚀 Paso 12: Endpoints de Negocio
+
+## Crear la aplicación
+
+```csharp
+var app = builder.Build();
+
+app.UseSwagger();
+
+app.UseSwaggerUI();
+```
+
+---
+
+## DTO de entrada
+
+```csharp
+public record OrderPayload(
+    int CustomerId,
+    int ProductId,
+    int Quantity);
+```
+
+> 💡 Los **Records** son ideales para DTOs porque son inmutables y ligeros.
+
+---
+
+# Endpoint para restaurar el inventario
+
+```csharp
+app.MapPost("/inventory/reset",
+    (LibraryDbContext db,
+     ILogger<Program> logger) =>
+{
+    logger.LogInformation(
+        "Iniciando restauración del inventario.");
+
+    foreach (InventoryItem inv in db.Inventory)
+    {
+        switch (inv.Id)
+        {
+            case 1:
+                inv.CurrentStock = 5;
+                break;
+
+            case 2:
+                inv.CurrentStock = 3;
+                break;
+
+            case 3:
+                inv.CurrentStock = 8;
+                break;
+        }
+    }
+
+    db.SaveChanges();
+
+    logger.LogInformation(
+        "Inventario restaurado correctamente.");
+
+    return Results.Ok("stock reset");
+});
+```
+
+### Objetivo
+
+Facilitar pruebas de integración restableciendo el inventario.
+
+---
+
+# Endpoint para crear órdenes
+
+```csharp
+app.MapPost("/orders",
+async (
+    OrderPayload orderRequest,
+    IDbContextFactory<LibraryDbContext> factory,
+    CancellationToken ct,
+    IFulfillmentService service) =>
+{
+    await using var db =
+        await factory.CreateDbContextAsync(ct);
+
+    var newOrder = new Order
+    {
+        CustomerId = orderRequest.CustomerId,
+        Priority = Priority.Normal,
+
+        Lines =
+        {
+            new OrderLine
+            {
+                ProductId = orderRequest.ProductId,
+                Quantity = orderRequest.Quantity
+            }
+        }
+    };
+
+    db.Orders.Add(newOrder);
+
+    await db.SaveChangesAsync(ct);
+
+    FulfillmentResult result =
+        await service.FulfillOneAsync(
+            newOrder.Id,
+            ct);
+
+    return Results.Ok(new
+    {
+        orderId = newOrder.Id,
+        result = result.ToString()
+    });
+});
+```
+
+### Flujo del endpoint
+
+```text
+HTTP Request
+
+      │
+
+Crear DbContext
+
+      │
+
+Crear Orden
+
+      │
+
+Guardar
+
+      │
+
+Invocar Servicio
+
+      │
+
+Procesar Inventario
+
+      │
+
+Responder
+```
+
+---
+
+# 👔 Paso 13: Servicio de Negocio
+
+Crea la carpeta:
+
+```text
+Library.Api
+│
+└── Fulfillment
+    │
+    ├── IFulfillmentService.cs
+    └── FulfillmentService.cs
+```
+
+---
+
+## Resultado del procesamiento
+
+```csharp
+public enum FulfillmentResult
+{
+    Fulfilled,
+    Backordered
+}
+```
+
+---
+
+## Resultado agregado
+
+```csharp
+public record BurstResult(
+    int Fulfilled,
+    int Backordered);
+```
+
+---
+
+## Contrato del servicio
+
+```csharp
+public interface IFulfillmentService
+{
+    Task<FulfillmentResult>
+        FulfillOneAsync(
+            int orderId,
+            CancellationToken ct);
+}
+```
+
+---
+
+# Implementación
+
+```csharp
+public class FulfillmentService
+    : IFulfillmentService
+{
+    private readonly
+        IDbContextFactory<LibraryDbContext>
+        _factory;
+
+    public FulfillmentService(
+        IDbContextFactory<LibraryDbContext> factory)
+    {
+        _factory = factory;
+    }
+
+    public async Task<FulfillmentResult>
+        FulfillOneAsync(
+            int orderId,
+            CancellationToken ct)
+    {
+        ...
+    }
+}
+```
+
+---
+
+# Flujo interno del servicio
+
+```text
+Obtener Orden
+
+        │
+
+Cargar Líneas
+
+        │
+
+Consultar Inventario
+
+        │
+
+¿Hay Stock?
+
+   ┌──────────────┐
+   │              │
+  Sí             No
+   │              │
+Actualizar      Backordered
+Stock             │
+   │              │
+Guardar           │
+   │              │
+ Fulfilled ◄──────┘
+```
+
+---
+
+# Caso: Stock insuficiente
+
+```csharp
+if (!canFulfill)
+{
+    order.Status = Status.Backordered;
+
+    db.FulfillmentEvents.Add(
+        new FulfillmentEvent
+        {
+            OrderId = orderId,
+            Type = "Backorder"
+        });
+
+    await db.SaveChangesAsync(ct);
+
+    Log.Warning(
+        "Orden {OrderId} enviada a Backordered.",
+        orderId);
+
+    return FulfillmentResult.Backordered;
+}
+```
+
+---
+
+# Caso: Stock suficiente
+
+```csharp
+order.Status = Status.Fulfilled;
+
+order.CompletedUtc = DateTime.UtcNow;
+
+db.FulfillmentEvents.Add(
+    new FulfillmentEvent
+    {
+        OrderId = orderId,
+        Type = "Fulfilled"
+    });
+```
+
+Posteriormente se intenta guardar aplicando una política automática de reintentos.
+
+---
+
+# 🔄 Algoritmo de Reintentos
+
+```text
+Guardar
+
+   │
+
+¿Concurrencia?
+
+   │
+
+No────────► Finalizar
+
+   │
+
+Sí
+
+   │
+
+Recargar datos
+
+   │
+
+Actualizar RowVersion
+
+   │
+
+Recalcular Stock
+
+   │
+
+Guardar nuevamente
+```
+
+---
+
+## Método `SaveWithRetryAsync`
+
+```csharp
+private static async Task<bool>
+SaveWithRetryAsync(...)
+{
+    for (int attempt = 0; ; attempt++)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+
+            return true;
+        }
+        catch (DbUpdateConcurrencyException ex)
+            when (attempt < 3)
+        {
+            ...
+        }
+    }
+}
+```
+
+---
+
+# ¿Qué ocurre cuando existe una colisión?
+
+Cada conflicto produce una excepción.
+
+```text
+DbUpdateConcurrencyException
+```
+
+El algoritmo realiza:
+
+1. Captura la excepción.
+2. Consulta nuevamente la base de datos.
+3. Actualiza el `RowVersion`.
+4. Recalcula el inventario.
+5. Reintenta guardar.
+
+---
+
+## Recargar los valores actuales
+
+```csharp
+var current =
+    await entry.GetDatabaseValuesAsync();
+```
+
+---
+
+## Sincronizar el Change Tracker
+
+```csharp
+entry.OriginalValues
+    .SetValues(current);
+```
+
+---
+
+## Obtener el stock actualizado
+
+```csharp
+int freshValue =
+    current.GetValue<int>(
+        nameof(InventoryItem.CurrentStock));
+```
+
+---
+
+## Verificar nuevamente
+
+```csharp
+if (freshValue < desiredAmount)
+    return false;
+```
+
+---
+
+## Recalcular el inventario
+
+```csharp
+inv.CurrentStock =
+    freshValue - desiredAmount;
+```
+
+---
+
+# ¿Qué sucede si fallan los tres intentos?
+
+El servicio cambia automáticamente la orden a:
+
+```text
+Backordered
+```
+
+Esto garantiza que:
+
+- Nunca se venda inventario inexistente.
+- No se pierda consistencia.
+- Se mantenga la integridad de los datos.
+
+---
+
+# Logging estructurado
+
+Durante todo el proceso se registran eventos relevantes.
+
+```csharp
+Log.Information(
+    "Orden {OrderId} procesada correctamente.",
+    orderId);
+
+Log.Warning(
+    "Orden {OrderId} enviada a Backordered.",
+    orderId);
+```
+
+### Ventajas
+
+- Los parámetros permanecen estructurados.
+- Fácil integración con Elastic, Seq, Azure Monitor, Datadog, etc.
+- Consultas eficientes sobre los logs.
+
+---
+
+# 📌 Conceptos aprendidos
+
+Al finalizar este día habrás aprendido:
+
+- ✅ Dependency Injection.
+- ✅ Ciclos de vida (`Transient`, `Scoped`, `Singleton`).
+- ✅ `IDbContextFactory`.
+- ✅ Logging estructurado con Serilog.
+- ✅ Registro de servicios.
+- ✅ Separación entre API y lógica de negocio.
+- ✅ Servicios orientados a interfaces.
+- ✅ DTOs utilizando Records.
+- ✅ Procesamiento de órdenes.
+- ✅ Manejo de inventario.
+- ✅ Estrategias de resiliencia.
+- ✅ Reintentos automáticos.
+- ✅ Manejo de concurrencia optimista.
+- ✅ Arquitectura desacoplada y mantenible.
+
+Estos conceptos constituyen la base para desarrollar aplicaciones empresariales escalables utilizando **ASP.NET Core**, **Entity Framework Core** y **Serilog**.
