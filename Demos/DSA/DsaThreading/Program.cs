@@ -1,13 +1,14 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using DsaThreading;
 
 Console.WriteLine("Hello, World!");
 
-ThreadingDemo();
+await ThreadingDemo();
 
 
-static void ThreadingDemo()
+static async Task ThreadingDemo()
 {
     // How C# manages Thread (OS threads not CPU threads)
     //In C# threads are an object, they are managed by the CLR. For example, when this main runs to print "Hello, World!" a thread is created to run the main method. The CLR manages the thread and its lifecycle. When the main method completes, the thread is terminated.
@@ -148,7 +149,7 @@ static void ThreadingDemo()
 
         sw.Stop();
 
-        Console.WriteLine($"Sequential sum = {parallelTotal}. {sw.ElapsedTicks} ticks, multi-thread");
+        Console.WriteLine($"Parallel sum = {parallelTotal}. {sw.ElapsedTicks} ticks, multi-thread");
     }
 
     static long SumRange(int[] a, int start, int end)
@@ -179,4 +180,95 @@ static void ThreadingDemo()
         Console.WriteLine($"Safe Balance = {bank.Balance} (expected 100000)");
     }
 
+    // Onterlocked - lockfree atomic operations against one variable
+
+    InterlockedDemo();
+
+    static void InterlockedDemo()
+    {
+        long counter = 0;
+        //Interlock - faster than a lock when doing single atomic operations
+        // if all you need is that - use an interlock over a lock
+        Parallel.For(0, 100000, _ => Interlocked.Increment(ref counter));
+        Console.WriteLine($"Interlocked = {counter} (expected 100000)");
+
+        //Deadlocks and Starvation
+
+        //Deadlock - If two tasks create locks on resources the other ends up needing
+        //they can deadlock. In this case they never resolve . our console app
+        //would be waiting forever
+
+        //Starvation - A thread gets blocked by another thread world - and stays alive
+        // but cannot progress. Different from a deadlock - because the other thread is able to resolve
+        //This starved thread persists - potentially starving the ThreadPool
+
+        // Cancellation Tokens
+
+        CancellationDemo();
+        // Rather than abruptly killing a thread or having it die via some exception
+        //Potentially leading to data loss -  we can use a cancellation token to ASK a thread to be ended and it will do so once it has the chance to exit gracefully
+        static void CancellationDemo()
+        {
+            // Calling for a CancellationToken, having it auto-cancel after 100ms
+            // Side not using: Once we exit the scope where the variable created with using
+            // lives in - dispose of it
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+            CancellationToken token = cts.Token;
+
+            var work = Task.Run(() =>
+            {
+                for (long i = 0; ; i++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (i % 5000000 == 0) {/*some simulated work*/}
+                }
+            }, token);
+
+            try
+            {
+                work.Wait();
+            }
+            catch (AggregateException ex) when (ex.InnerException is OperationCanceledException)
+            {
+                Console.WriteLine("Work was cancelled cooperatively");
+            } //When doing tasks parallel library stuff, we need to unwrap the AggregateExceptions
+            //to allow for specific catch. Same logic as multiple blocks
+            //Just more convoluted because AggregateExceptions are like an exception list
+            catch(AggregateException ex) when (ex.InnerException is InvalidOperationException)
+            {
+                Console.WriteLine("How'd you get here?");
+            }
+        }
+    }
+
+    ExceptionDemo();
+
+    static void ExceptionDemo()
+    {
+        //Our task start up here when we call run...
+        var t = Task.Run(() => throw new InvalidOperationException("oops"));
+
+        //Counter-intuitively, an exception inside a task DOES NOT crash on the spot
+        //Because its actually thrown during the t.Wait() below.
+        try
+        {
+            t.Wait();
+        }
+        catch (AggregateException ex)
+        {
+            // Aggregate exceptions themselves are kind of weird
+            // One task have several fault - so they get thrown inside an AggregateException
+            Console.WriteLine($"Caught . {ex.InnerException!.Message}");
+        }
+    }
+
+    await AsyncDemo();
+
+    static async Task AsyncDemo()
+    {
+        Console.WriteLine($"Before await on thread #{Environment.CurrentManagedThreadId}");
+        await Task.Delay(50);
+        Console.WriteLine($"After await on thread #{Environment.CurrentManagedThreadId}");
+    }
 }
