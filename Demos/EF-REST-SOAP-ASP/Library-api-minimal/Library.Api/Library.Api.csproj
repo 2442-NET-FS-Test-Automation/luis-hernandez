@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <ProjectReference Include="..\Library.Data\Library.Data.csproj" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">
