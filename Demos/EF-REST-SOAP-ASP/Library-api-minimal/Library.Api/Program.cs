@@ -3,17 +3,18 @@ using Library.Data;
 using Library.Data.Entities;
 using Serilog;
 using Library.Api.Fulfillment;
+using System.Diagnostics;
 
-//My API program.cs
-//No main. We can think of it as 2 sections
-//Registering things with the builder
-//And the configuring things on the app
-//And at the very bottom that app object that represents our entire API alls ots run method
+// This is my API program.cs
+// No main. We can think of it as 2 sections
+// Registering things with the builder. 
+// And then configuring things on the app
+// And at the very bottom that app object that represents our entire API calls its run method
 
-//Builder area
+// Builder area
 var builder = WebApplication.CreateBuilder(args);
 
-// The first thing that we need is to give our builder a connection string to a database
+// The first thing that we need is to give our builder a connection string to our database
 var conn_string = "Server=localhost,1433;Database=LibraryMinimalDb;User Id=sa;Password=LibraryPass1!;TrustServerCertificate=true";
 
 Log.Logger = new LoggerConfiguration()
@@ -23,59 +24,76 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Host.UseSerilog(); // Tell the builder to use Serilog for logging
 
-//Tell the builder to use our LibraryDbContext with the connection string above
-//By registering our DbContext class
-//we hand off the managing of creating and destroying theses DbContext object to ASP.NET's
-//dependency injection container. Like spring beans if you're familiar.
 
+// Tell the builder to use our LibraryDbContext with the connection string above
+// By registering our DbContext class (or even classes, technically you use one per Database)
+// we hand off the managing of creating and destroying these DbContext objects to ASP.NET's
+// dependency injection container. Like spring beans if you're familiar. 
 
-//ASP .NET has few different scope types
-// Transient - a new instance is created every time it's requested
-// Scoped - a new instance per HTTP request
-// Singleton - A single instance for th entire runtime
-builder.Services.AddDbContext<LibraryDbContext>(options => options.UseSqlServer(conn_string), ServiceLifetime.Scoped, ServiceLifetime.Singleton); //Scoped is the default, but we can be explicit - and allow for SingletonScope when needed 
+// ASP.NET has few different scope types. 
+// Transient - a new instance is created every time it's requested.
+// Scoped - a new instance per HTTP request 
+// Singleton - A single instance for the entire runtime of the app 
+builder.Services.AddDbContext<LibraryDbContext>(options => options.UseSqlServer(conn_string),
+    ServiceLifetime.Scoped, ServiceLifetime.Singleton); // Scoped is the default, but we can be explicit - and allow for SingletonScope 
+                                                        // when needed
 
-//We know we will need more than one LibraryDbContext in one or more of these methods. But we don't knw how many before runtime, So we can use a DbContextFactory to create as many we need at runtime.
+// We know we will need more than one LibraryDbContext in one or more of these methods. But we don't know how many 
+// before runtime. So we can use a DbContextFactory to create as many as we need at runtime.
 builder.Services.AddDbContextFactory<LibraryDbContext>(options => options.UseSqlServer(conn_string));
 
 // Registered our custom service with the builder
 builder.Services.AddScoped<IFulfillmentService, FulfillmentService>();
+builder.Services.AddScoped<ISeeder, Seeder>();
+builder.Services.AddScoped<BurstPlanner>(); //Adding our burst planner, will be used un fulfillment
+builder.Services.AddScoped<OrderFactory>();
 
-//Swagger stuff added o builder
+// Swagger stuff added to builder
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-
 
 // App area
 var app = builder.Build();
 
-//Swagger stuff aded to app
+// Swagger stuff added to app
 app.UseSwagger();
 app.UseSwaggerUI();
 
-//Endpoint area
+// Endpoint area
 app.MapGet("/", () => "Hello World!");
 
-//Get all items from the inventory
+// Get all items from the inventory
 app.MapGet("/inventory", async (LibraryDbContext db) =>
 {
+    // we should probably await this - may not matter because we are local
     return await db.Inventory.ToListAsync();
 });
 
-//Lets use LINQ - Language Integrated Query
+// Lets use LINQ - Language Integrated Query
 // LINQ is a library that just lets us query collections
-// The logic actually flows from SQL  DQL - You can use method OR sql query syntax
-// You can even save the queries themselves as C# objects if you want to
+// The logic actually flows from SQL DQL - You can use method OR sql query syntax
+// You can even save the queries themselves as C# objects if you want to 
 app.MapGet("/inventory/by-value", (LibraryDbContext db) =>
 {
+
     return db.Inventory.Include(i => i.Product)
-        .GroupBy(i => i.CurrentStock >= 5 ? "well-stocked" : "low")
+        .GroupBy(i => i.CurrentStock >= 5 ? "well-stocked" : "low")  //group by just like in sql
         .Select(g => new { tier = g.Key, count = g.Count(), units = g.Sum(i => i.CurrentStock) })
         .ToList();
 });
 
-// Any endpoint that start with "/peek" are diagnostic/demo
-//We are going to use them to expose things like EF Core change tracking and other underlying behaviors for learning. A real app would have no reason to expose HTTP endpoints to outside users to make this stuff observable
+app.MapGet("/peek/loading", (LibraryDbContext db) =>
+{
+    Product product = db.Products.First(); //grab the first product from DB table
+    // Explicit loading via Load()
+    db.Entry(product).Reference(p => p.Inventory).Load(); //making another trip to the database to populate the property
+});
+
+
+// Any endpoints that start with "/peek/*" are diagnostic/demo
+// We are going to use them to expose things like EF Core change tracking and other 
+// underlying behaviors for learning. A real app would have no reason to expose HTTP endpoints
+// to outside users to make this stuff observable. 
 
 app.MapGet("/peek/tracking", (LibraryDbContext db) =>
 {
@@ -211,7 +229,8 @@ app.MapPost("/inventory/rest", (LibraryDbContext db, ILogger<Program> logger) =>
 // I can also take in parameters from the body
 
 // Quick method to fulfill one order
-app.MapPost("/orders", async (OrderPaylod orderRequest, IDbContextFactory<LibraryDbContext> factory, CancellationToken ct, IFulfillmentService fSvc) =>
+app.MapPost("/orders", async (OrderPaylod orderRequest, IDbContextFactory<LibraryDbContext> factory,
+            CancellationToken ct, IFulfillmentService fSvc) =>
 {
     // Remember we create an order in our db
     // And then try to create a Successful fulfillment record against the db
@@ -233,9 +252,146 @@ app.MapPost("/orders", async (OrderPaylod orderRequest, IDbContextFactory<Librar
     return Results.Ok(new { orderId = newOrder.Id, result = result.ToString() });
 });
 
-//My file always end with app.Run() - minimal API or Controller API
+
+
+// Burst endpoint
+// Forgoing creating a record - we will take these from a the query string
+// IHostAPplicationLifetime - this lets us see events related to the app lifetime
+// We are going to use it to make sure we "flush" pending orders if the app is asked to stop
+app.MapPost("/orders/burst", (int n, bool expedited, ISeeder seeder,
+    IServiceScopeFactory scopes, IHostApplicationLifetime lifetime) =>
+{
+    var ids = seeder.SeedOrders(n, expedited); // calling the seed orders method with the stuff from front end
+    var appStopping = lifetime.ApplicationStopping; // gives us a cancellation token that is called when app goes to shutdown
+
+    _ = Task.Run(async () => // assigning the task result to a discard runs this as a background task
+    {
+        try
+        {
+            using var scope = scopes.CreateScope(); // ask for a fresh scope
+            var service = scope.ServiceProvider.GetRequiredService<IFulfillmentService>(); //grab a fulfillment service
+            await service.FulfillBurstAsync(ids, appStopping); // use it to call fulfillBurstAsync()
+        }
+        catch (Exception ex)
+        {
+            // This task is fire and forget because we aren't waiting or storing its result
+            // any exceptions would be "swallowed" i.e. they would die with the task in the background 
+            Log.Error(ex, "Burst fulfillment failed");
+        }
+    }, appStopping);
+
+});
+
+app.MapGet("/verify/no-oversell", (LibraryDbContext db) =>
+{
+    var rows = db.Inventory.Include(i => i.Product).ToList(); // grab Inventory rows, include the product objects as well
+    var negative = rows.Where(i => i.CurrentStock < 0).ToList(); //grab items with negative stock
+    var fulfilled = db.FulfillmentEvents.Count(e => e.Type == "Fulfilled"); // count the fulfilled orders
+
+    return new
+    {
+        anyNegative = negative.Any(),
+        onHand = rows.Select(i => new { i.ProductId, i.CurrentStock }),
+        unitsFulfilled = fulfilled
+    };
+
+});
+
+app.MapPost("/benchmark", async (int n, IFulfillmentService fs, ISeeder seeder, CancellationToken ct) =>
+{
+    // Lets see how sequential vs parallel runs compare - with mixed order
+    var ids1 = seeder.ResetAndCreateOrders(n);
+
+    // First, sequential
+    var sw1 = Stopwatch.StartNew(); // start our stopwatch
+
+    foreach (var id in ids1)
+        await fs.FulfillOneAsync(id, ct);
+    sw1.Stop();
+
+    // Next concurrent
+    var ids2 = seeder.ResetAndCreateOrders(n);
+    var sw2 = Stopwatch.StartNew();
+    await fs.FulfillBurstAsync(ids2, ct);
+    sw2.Stop();
+
+    return new
+    {
+        sequentialMs = sw1.ElapsedMilliseconds,
+        concurrentMs = sw2.ElapsedMilliseconds
+    };
+});
+
+// Completion report -- what orders got completed and when
+//Note: In general Expedited orders should be completed first. In practice - it depends on how long each thread takes
+//if for some reason an expedited order's thread slows down (due to some background process on the computer or something)
+// then a normal order CAN beat it. But we should see a defined trend.
+app.MapGet("/reports/by-completion", (LibraryDbContext db) =>
+{
+    return db.Orders // look inside orders table
+    .Where(o => o.Status == Status.Fulfilled) // gran fulfilled orders
+    .OrderBy(o => o.CompletedUtc) // order by when they were completed
+    .Select(o => new { o.Id, o.Priority, o.CompletedUtc }) //use info from those orders to make some return objects
+    .ToList(); //put them in a list and return them as a JSON body of response
+});
+
+app.MapGet("/reports/top-products", (LibraryDbContext db) =>
+{
+    var ranked = db.FulfillmentEvents
+    .Where(e => e.Type == "Fulfilled")
+    .Join(db.OrderLines, e => e.OrderId, l => l.OrderId, (e, l) => l)
+    .GroupBy(l => l.ProductId)
+    .Select(g => new { ProductId = g.Key, Units = g.Sum(l => l.Quantity) })
+    .OrderByDescending(x => x.Units)
+    .ToList();
+    return ranked;
+});
+
+// Using LINQ and BinarySearch to grab nits sold per product, ordered ascending
+app.MapGet("/reports/rank-pf/{units:int}", (int units, LibraryDbContext db) =>
+{
+    //Find product ranking that sold x  units
+    var unitDesc = db.FulfillmentEvents
+                    .Where(e => e.Type == "Fulfilled")
+                    .Join(db.OrderLines, e => e.OrderId, l => l.OrderId, (e, l) => l)
+                    .GroupBy(l => l.ProductId)
+                    .Select(g => g.Sum(l => l.Quantity))
+                    .OrderByDescending(u => u)
+                    .ToArray();
+    //Sorted DESC  => using Binary Search to find the index of a specific quantity sold
+    // 1000, 400, 330, 34
+    // Our BinarySearch needs a comparer - for somethinf like an 
+    // 1000, 00, 330, 34
+    var index = Array.BinarySearch(unitDesc, units, Comparer<int>.Create((a, b) => b.CompareTo(a)));
+
+    return new { units, rank = index >= 0 ? index + 1 : -1 }; // If BinarySearch doesn't find a thing - it returns one bitwise
+});
+
+app.MapPost("/orders-with-factory", async (OrderRequest req, OrderFactory factory, IDbContextFactory<LibraryDbContext> dbf, CancellationToken ct) =>
+{
+    try
+    {
+        Order newOrder = factory.CreateOrder(req.Kind, req.CustomerId, req.Lines.Select(l => (l.Sku, l.Qty)));
+
+        await using var db = await dbf.CreateDbContextAsync(ct);
+
+        db.Orders.Add(newOrder);
+
+        await db.SaveChangesAsync(ct);
+
+        return Results.Created($"/orders/{newOrder.Id}", new { newOrder.Id });
+    }
+    catch (UnknownSkuException ex)
+    {
+        Log.Warning("Rejected order : unknown SKU {Sku}", ex.Sku);
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+// My file always ends with app.Run() - minimal API or Controller API
 app.Run();
-
 Log.CloseAndFlush();
-
 public record OrderPaylod(int ProductId, int Quantity, int CustomerId);
+
+public record OrderLineRequest(string Sku, int Qty);
+public record OrderRequest(string Kind, int CustomerId, List<OrderLineRequest> Lines);
