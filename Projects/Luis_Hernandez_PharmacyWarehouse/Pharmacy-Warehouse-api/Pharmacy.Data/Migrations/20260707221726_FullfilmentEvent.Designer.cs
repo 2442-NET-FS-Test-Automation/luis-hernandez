@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Pharmacy.Data.Configurations;
 
@@ -11,9 +12,11 @@ using Pharmacy.Data.Configurations;
 namespace Pharmacy.Data.Migrations
 {
     [DbContext(typeof(PharmacyDbContext))]
-    partial class PharmacyDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260707221726_FullfilmentEvent")]
+    partial class FullfilmentEvent
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -120,6 +123,9 @@ namespace Pharmacy.Data.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("DispatcherId")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("FulfilledAtUtc")
                         .HasColumnType("datetime2");
 
@@ -133,6 +139,8 @@ namespace Pharmacy.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DispatcherId");
+
                     b.HasIndex("OrderId");
 
                     b.ToTable("FulfillmentEvents");
@@ -141,16 +149,10 @@ namespace Pharmacy.Data.Migrations
                         new
                         {
                             Id = 1,
-                            FulfilledAtUtc = new DateTime(2026, 6, 20, 10, 0, 0, 0, DateTimeKind.Utc),
-                            OrderId = 1,
-                            Type = "Created"
-                        },
-                        new
-                        {
-                            Id = 2,
+                            DispatcherId = 1,
                             FulfilledAtUtc = new DateTime(2026, 6, 21, 15, 30, 0, 0, DateTimeKind.Utc),
                             OrderId = 1,
-                            Type = "Shipped"
+                            Type = "Fulfilled"
                         });
                 });
 
@@ -262,9 +264,6 @@ namespace Pharmacy.Data.Migrations
                     b.Property<int>("CustomerId")
                         .HasColumnType("int");
 
-                    b.Property<int>("DispatcherId")
-                        .HasColumnType("int");
-
                     b.Property<int>("Priority")
                         .HasColumnType("int");
 
@@ -272,14 +271,11 @@ namespace Pharmacy.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<decimal>("TotalPrice")
-                        .HasPrecision(10, 2)
                         .HasColumnType("decimal(10,2)");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CustomerId");
-
-                    b.HasIndex("DispatcherId");
 
                     b.HasIndex("Priority");
 
@@ -294,7 +290,6 @@ namespace Pharmacy.Data.Migrations
                             CompletedUtc = new DateTime(2026, 6, 21, 15, 30, 0, 0, DateTimeKind.Utc),
                             CreatedUtc = new DateTime(2026, 6, 20, 10, 0, 0, 0, DateTimeKind.Utc),
                             CustomerId = 1,
-                            DispatcherId = 1,
                             Priority = 0,
                             Status = 1,
                             TotalPrice = 180.90m
@@ -304,7 +299,6 @@ namespace Pharmacy.Data.Migrations
                             Id = 2,
                             CreatedUtc = new DateTime(2026, 7, 1, 9, 0, 0, 0, DateTimeKind.Utc),
                             CustomerId = 2,
-                            DispatcherId = 2,
                             Priority = 1,
                             Status = 0,
                             TotalPrice = 210.00m
@@ -447,6 +441,12 @@ namespace Pharmacy.Data.Migrations
 
             modelBuilder.Entity("Pharmacy.Data.Entities.FulfillmentEvent", b =>
                 {
+                    b.HasOne("Pharmacy.Data.Entities.Dispatcher", null)
+                        .WithMany()
+                        .HasForeignKey("DispatcherId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("Pharmacy.Data.Entities.Order", null)
                         .WithMany()
                         .HasForeignKey("OrderId")
@@ -473,15 +473,7 @@ namespace Pharmacy.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Pharmacy.Data.Entities.Dispatcher", "Dispatcher")
-                        .WithMany()
-                        .HasForeignKey("DispatcherId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.Navigation("Customer");
-
-                    b.Navigation("Dispatcher");
                 });
 
             modelBuilder.Entity("Pharmacy.Data.Entities.OrderLine", b =>

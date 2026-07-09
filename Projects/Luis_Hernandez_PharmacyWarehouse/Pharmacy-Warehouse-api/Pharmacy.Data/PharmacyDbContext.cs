@@ -10,9 +10,9 @@ public class PharmacyDbContext : DbContext
     { }
 
     //what C# classes we are tracking as Entities
-    public DbSet<Product> Products { get; set; }
-    public DbSet<Laboratory> Laboratories { get; set; }
-    public DbSet<InventoryItem> Inventory { get; set; }
+    public DbSet<Product> Products => Set<Product>();
+    public DbSet<Laboratory> Laboratories => Set<Laboratory>();
+    public DbSet<InventoryItem> Inventory => Set<InventoryItem>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
     public DbSet<Customer> Customers => Set<Customer>();
@@ -86,13 +86,6 @@ public class PharmacyDbContext : DbContext
             e.Property(o => o.Status).HasConversion<int>().IsRequired();
             e.Property(o => o.CreatedUtc).IsRequired();
 
-            // Dispatcher hasn't an Orders collection in the model,
-            // thats because WithMany() goes without inverse navigation.
-            e.HasOne(o => o.Dispatcher)
-                .WithMany()
-                .HasForeignKey(o => o.DispatcherId)
-                .OnDelete(DeleteBehavior.Restrict);
-
             // Same navigation idea with 1 Order -> N Lines
             //Through OrderId as FK in OrderLine
             e.HasMany(o => o.Lines)
@@ -125,8 +118,13 @@ public class PharmacyDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(f => f.OrderId)
                 .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Dispatcher>()
+                .WithMany()
+                .HasForeignKey(f => f.DispatcherId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             e.HasIndex(f => f.OrderId);
+            e.HasIndex(f => f.DispatcherId);
         });
 
         // Setting our RowVersion property as an EF Core Row Version
@@ -165,8 +163,8 @@ public class PharmacyDbContext : DbContext
         );
 
         b.Entity<Order>().HasData(
-            new Order { Id = 1, CustomerId = 1, DispatcherId = 1, TotalPrice = 180.90m, Priority = OrderPriority.Normal, Status = OrderStatus.Fulfilled, CreatedUtc = new DateTime(2026, 6, 20, 10, 0, 0, DateTimeKind.Utc), CompletedUtc = new DateTime(2026, 6, 21, 15, 30, 0, DateTimeKind.Utc) },
-            new Order { Id = 2, CustomerId = 2, DispatcherId = 2, TotalPrice = 210.00m, Priority = OrderPriority.Expedited, Status = OrderStatus.Pending, CreatedUtc = new DateTime(2026, 7, 1, 9, 0, 0, DateTimeKind.Utc) }
+            new Order { Id = 1, CustomerId = 1, TotalPrice = 180.90m, Priority = OrderPriority.Normal, Status = OrderStatus.Fulfilled, CreatedUtc = new DateTime(2026, 6, 20, 10, 0, 0, DateTimeKind.Utc), CompletedUtc = new DateTime(2026, 6, 21, 15, 30, 0, DateTimeKind.Utc) },
+            new Order { Id = 2, CustomerId = 2, TotalPrice = 210.00m, Priority = OrderPriority.Expedited, Status = OrderStatus.Pending, CreatedUtc = new DateTime(2026, 7, 1, 9, 0, 0, DateTimeKind.Utc) }
         );
 
         b.Entity<OrderLine>().HasData(
@@ -176,8 +174,7 @@ public class PharmacyDbContext : DbContext
         );
 
         b.Entity<FulfillmentEvent>().HasData(
-            new FulfillmentEvent { Id = 1, OrderId = 1, Type = "Created", FulfilledAtUtc = new DateTime(2026, 6, 20, 10, 0, 0, DateTimeKind.Utc) },
-            new FulfillmentEvent { Id = 2, OrderId = 1, Type = "Shipped", FulfilledAtUtc = new DateTime(2026, 6, 21, 15, 30, 0, DateTimeKind.Utc) }
+            new FulfillmentEvent { Id = 1, OrderId = 1, DispatcherId = 1, Type = "Fulfilled", FulfilledAtUtc = new DateTime(2026, 6, 21, 15, 30, 0, DateTimeKind.Utc) }
         );
     }
 

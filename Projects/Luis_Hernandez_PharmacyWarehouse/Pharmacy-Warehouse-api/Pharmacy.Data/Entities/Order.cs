@@ -5,8 +5,6 @@ namespace Pharmacy.Data.Entities;
 public class Order
 {
     public int Id { get; set; }
-
-    [Precision(10,2)]
     public decimal TotalPrice { get; set; }
 
     public OrderPriority Priority { get; set; }
@@ -14,9 +12,6 @@ public class Order
 
     public int CustomerId { get; set; }
     public Customer Customer { get; set; } = default!;
-
-    public int DispatcherId { get; set; }
-    public Dispatcher Dispatcher { get; set; } = default!;
 
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedUtc { get; set; }
