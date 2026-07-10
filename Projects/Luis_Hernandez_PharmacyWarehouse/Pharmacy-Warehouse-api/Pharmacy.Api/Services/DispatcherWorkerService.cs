@@ -9,14 +9,15 @@ using Serilog;
 namespace Pharmacy.Api.Queueing;
 
 /// <summary>
-/// Al arrancar, crea un "worker loop" por cada Dispatcher existente en la
-/// base de datos. Cada loop representa a ese Dispatcher jalando (pull)
-/// órdenes de PriorityOrderQueue cuando está libre: se marca Busy, procesa
-/// vía IFulfillmentService, y se libera (Free) al terminar.
-///
-/// Es Singleton (como todo BackgroundService); resuelve sus dependencias
-/// Scoped (PharmacyDbContext, IFulfillmentService) creando un IServiceScope
-/// nuevo por cada orden procesada.
+/// When starting, the program creates one "worker loop" per database Dispatcher 
+/// Each loop can be seen as an Dispatcher pulling orders from PriorityOrderQueue
+/// when is free: is marked as Busy, process the taken order using 
+/// IFulfillmentService, an once finish the fulfillment process is marked as free.
+/// when is busy: doesn't try to pull an order until is marked as free
+
+/// Because is a BackgroundService it is Singleton
+/// So we shouldn't inject services with life time Scoped (like DbContext) 
+/// The class itself solves its Scoped dependencies ex. (PharmacyDbContext, IFulfillmentService) through creating a new IServiceScope per processed order 
 /// </summary>
 public class DispatcherWorkerService : BackgroundService
 {
@@ -72,23 +73,22 @@ public class DispatcherWorkerService : BackgroundService
 
                 if (!await DispatcherAllocation.TryMarkBusyAsync(db, dispatcherId, ct))
                 {
-                    // El dispatcher ya estaba Busy por otra vía (poco común dado
-                    // que este loop es el único dueño de este id); reencolamos
-                    // la orden para que no se pierda y seguimos.
+                    // Dispatcher was previously busy (it should not occurs), 
+                    // in this hypothetical case we repose the order on queue 
+                    // so the order doesn't miss
                     _queue.Enqueue(orderId, OrderPriority.Normal);
                     continue;
                 }
 
+                // Here the system takes a dispatcher and assign him an order 
+                // to be processed using fulfillmentService.FulfillOneAsync
                 try
                 {
-                    // Simula el tiempo real que le toma a un dispatcher preparar
-                    // un pedido (empacar, verificar, etc.). Sin esto, en local
-                    // las operaciones son tan rápidas (sub-milisegundo) que un
-                    // solo worker gana casi siempre la carrera por el siguiente
-                    // item antes de que el otro llegue a competir por turno —
-                    // no es un bug del modelo, es que no hay trabajo real que
-                    // simule ocupación. Ajusta o quita este delay cuando
-                    // conectes trabajo real (ej. llamadas a un WMS externo).
+                    
+                    // Simulation - The delay mocks the time that takes to a 
+                    // dispatcher packaging, verify, etc. and order
+                    // Because - there isn't a real work performed (like an external WMS were dispatchers can handle its assigned orders)
+
                     await Task.Delay(30, ct);
 
                     var result = await fulfillmentService.FulfillOneAsync(orderId, dispatcherId, ct);
@@ -106,16 +106,10 @@ public class DispatcherWorkerService : BackgroundService
             }
             catch (OperationCanceledException)
             {
-                break; // apagado gracioso del host
+                break; // host's gracefully shutdown
             }
             catch (Exception ex)
             {
-                // Antes, una excepción fuera de la llamada a FulfillOneAsync
-                // (ej. en TryMarkBusyAsync/MarkFreeAsync) escapaba sin capturar
-                // y mataba este loop para siempre — el Dispatcher dejaba de
-                // trabajar sin ningún log que lo explicara. Ahora todo el
-                // cuerpo del loop está cubierto: se registra el error y el
-                // worker sigue vivo para la próxima orden.
                 Log.Error(ex, "Dispatcher {DispatcherId} worker loop error", dispatcherId);
             }
         }

@@ -12,7 +12,7 @@ public class OrderFactory
         _fs = fulfillmentService;
     }
 
-    public Order CreateOrder(string kind, int customerId, IEnumerable<(string sku, int qty)> lines)
+    public Order CreateOrder(string kind, int customerId, IEnumerable<(string batch, int qty)> lines)
     {
         switch (kind)
         {
@@ -26,17 +26,25 @@ public class OrderFactory
 
     private Order BuildOrder(OrderPriority priority, int customerId, IEnumerable<(string batch, int units)> lines)
     {
-        //I need to asign a dispatcher here
+        // 1. Procesamos las líneas primero
+        var orderLines = lines.Select(l => new OrderLine
+        {
+            ProductId = _fs.ResolveProductId(l.batch),
+            Units = l.units
+        }).ToList();
+
+        // 2. Calculamos el total usando las líneas ya creadas
+        var totalPrice = orderLines.Sum(line => line.Units * _fs.GetProductPrice(line.ProductId));
+
+        // 3. Retornamos la orden limpia
         return new Order
         {
             CustomerId = customerId,
             Priority = priority,
             Status = OrderStatus.Pending,
-            Lines = lines.Select(l => new OrderLine
-            {
-                ProductId = _fs.ResolveProductId(l.batch),
-                Units = l.units
-            }).ToList()
+            Lines = orderLines,
+            CreatedUtc = DateTime.UtcNow,
+            TotalPrice = totalPrice
         };
     }
 

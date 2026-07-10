@@ -18,7 +18,9 @@ public interface IFulfillmentService
 
     Task<FulfillmentResult> FulfillWithAnyAvailableDispatcherAsync(int orderId, CancellationToken ct);
 
-    public int ResolveProductId(string sku);
+    int ResolveProductId(string sku);
+
+    decimal GetProductPrice(int id);
 }
 
 public class FulfillmentService : IFulfillmentService
@@ -157,6 +159,16 @@ public class FulfillmentService : IFulfillmentService
     public int ResolveProductId(string batch)
     {
         return _batchToProductId[batch];
+    }
+
+    public decimal GetProductPrice(int id)
+    {
+        using var db = _factory.CreateDbContext();
+
+        return db.Products
+            .Where(p => p.Id == id)      
+            .Select(p => p.Price)    
+            .FirstOrDefault();
     }
 
 

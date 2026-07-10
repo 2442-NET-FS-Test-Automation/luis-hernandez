@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Pharmacy.Data;
 using Serilog;
 using Pharmacy.Api.DTO;
+using Pharmacy.Api.Services;
 
 /// <summary>
 /// Genera órdenes de prueba reutilizando Customers y Products ya sembrados
@@ -26,9 +27,12 @@ public class Seeder : ISeeder
 
     private readonly IDbContextFactory<PharmacyDbContext> _factory;
 
-    public Seeder(IDbContextFactory<PharmacyDbContext> factory)
+    private readonly IFulfillmentService _fs;
+
+    public Seeder(IDbContextFactory<PharmacyDbContext> factory, IFulfillmentService fulfillmentService)
     {
         _factory = factory;
+        _fs = fulfillmentService;
     }
 
     public IReadOnlyCollection<SeededOrder> ResetAndCreateOrders(int n)
@@ -76,6 +80,15 @@ public class Seeder : ISeeder
             var productId = productIds[random.Next(productIds.Count)];
             var units = random.Next(1, 6);
 
+            // 1. Procesamos las líneas primero
+            var orderLines = new List<OrderLine>
+                {
+                    new() { ProductId = productId, Units = units }
+                };
+
+            // 2. Calculamos el total usando las líneas ya creadas
+            var totalPrice = orderLines.Sum(line => line.Units * _fs.GetProductPrice(line.ProductId));
+
             orders.Add(new Order
             {
                 CustomerId = customerId,
@@ -84,7 +97,9 @@ public class Seeder : ISeeder
                 Lines = new List<OrderLine>
                 {
                     new() { ProductId = productId, Units = units }
-                }
+                },
+                CreatedUtc = DateTime.UtcNow,
+                TotalPrice = totalPrice
             });
         }
 
